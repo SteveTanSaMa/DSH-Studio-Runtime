@@ -1,0 +1,68 @@
+# DSH Studio Runtime
+
+这个仓库负责构建、验证和发布 DSH Studio 使用的 Runtime。App 仓库
+[DSH Studio](https://github.com/SteveTanSaMa/DSH-Studio) 只保留 Runtime
+发现、下载、签名校验、安装和更新逻辑。
+
+## 内容
+
+- `.github/workflows/runtime-builder.yml`：按架构构建并发布 Runtime。
+- `Scripts/build-runtime.sh`：下载固定 Node.js、解析 Harness/pnpm 依赖、生成 Runtime artifact。
+- `Scripts/runtime-smoke.sh`：启动 Harness 并执行 `host.describe` smoke test。
+- `Scripts/generate-runtime-catalog.sh`：合并两个架构的 artifact metadata。
+- `Scripts/sign-runtime-catalog.sh`：使用 Ed25519 私钥签名 catalog。
+
+构建产生的压缩包、校验文件和 catalog 只作为 GitHub Actions artifact 或
+GitHub Release 资产发布，不提交到 Git 源码仓库。
+
+## 命名规范
+
+Runtime 版本使用：
+
+```text
+<HarnessVersion>-verN
+```
+
+例如：
+
+```text
+0.1.1-rc.2-ver1
+```
+
+对应 artifact：
+
+```text
+dsh-runtime-0.1.1-rc.2-ver1-darwin-arm64.tar.gz
+dsh-runtime-0.1.1-rc.2-ver1-darwin-x64.tar.gz
+```
+
+## 发布前配置
+
+在仓库设置以下变量或 workflow dispatch 输入：
+
+- `RUNTIME_DATA_FORMAT_ID`：Runtime 使用的数据格式，例如 `sqlite-v2`。
+- `RUNTIME_DATA_FORMAT_COMPATIBLE_WITH`：明确确认兼容的旧格式 ID，逗号分隔。
+- `RUNTIME_DATA_FORMAT_MIGRATION`：已存在官方迁移机制时填写迁移标识。
+- `RUNTIME_PNPM_VERSION`：可选的固定 pnpm 版本。
+
+仓库 Secrets 必须包含：
+
+```text
+RUNTIME_CATALOG_PRIVATE_KEY_BASE64
+```
+
+私钥只用于签名，不应写入仓库。App 内置对应的 Ed25519 公钥，并只信任
+下面两个固定地址：
+
+```text
+https://github.com/SteveTanSaMa/DSH-Studio-Runtime/releases/download/runtime-catalog/runtime-catalog.signed.json
+https://github.com/SteveTanSaMa/DSH-Studio-Runtime/releases/download/runtime-<version>/dsh-runtime-<version>-<architecture>.tar.gz
+```
+
+## 触发构建
+
+推荐通过 GitHub Actions 的 `workflow_dispatch` 输入完整的 Runtime 版本，
+例如 `0.1.1-rc.2-ver1`。也可以创建并推送 `runtime-<version>` tag；workflow
+会为 `darwin-arm64` 和 `darwin-x64` 分别构建，运行 smoke test，生成并签名
+catalog，然后创建对应的 Runtime Release，并更新固定的 `runtime-catalog`
+Release。
