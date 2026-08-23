@@ -32,7 +32,9 @@ const payload = fs.readFileSync(inputPath);
 const keyMaterial = privateKeyBase64
   ? Buffer.from(privateKeyBase64, "base64")
   : fs.readFileSync(privateKeyPath);
-const privateKey = crypto.createPrivateKey(keyMaterial);
+const privateKey = privateKeyBase64
+  ? crypto.createPrivateKey({ key: keyMaterial, format: "der", type: "pkcs8" })
+  : crypto.createPrivateKey(keyMaterial);
 const signature = crypto.sign(null, payload, privateKey);
 
 const envelope = {
