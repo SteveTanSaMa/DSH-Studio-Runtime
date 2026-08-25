@@ -27,16 +27,133 @@ on:
         description: "Explicit migration identifier, or leave blank"
         required: false
         type: string
+  schedule:
+    # GitHub Actions has no native cross-repository release trigger. Poll the
+    # official Harness releases and build only when a new version is found.
+    - cron: "*/15 * * * *"
   push:
     tags:
       - "runtime-*"
       - "!runtime-catalog"
 
+concurrency:
+  group: runtime-builder-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.resolve.outputs.should_build }}
+      runtime_version: ${{ steps.resolve.outputs.runtime_version }}
+      harness_version: ${{ steps.resolve.outputs.harness_version }}
+      pnpm_version: ${{ steps.resolve.outputs.pnpm_version }}
+      runtime_data_format_id: ${{ steps.resolve.outputs.runtime_data_format_id }}
+      runtime_data_format_compatible_with: ${{ steps.resolve.outputs.runtime_data_format_compatible_with }}
+      runtime_data_format_migration: ${{ steps.resolve.outputs.runtime_data_format_migration }}
+    steps:
+      - name: Resolve Runtime version
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF_NAME: ${{ github.ref_name }}
+          DISPATCH_RUNTIME_VERSION: ${{ inputs.runtime_version }}
+          DISPATCH_HARNESS_VERSION: ${{ inputs.harness_version }}
+          DISPATCH_PNPM_VERSION: ${{ inputs.pnpm_version }}
+          DISPATCH_DATA_FORMAT_ID: ${{ inputs.runtime_data_format_id }}
+          DISPATCH_DATA_FORMAT_COMPATIBLE_WITH: ${{ inputs.runtime_data_format_compatible_with }}
+          DISPATCH_DATA_FORMAT_MIGRATION: ${{ inputs.runtime_data_format_migration }}
+          DEFAULT_PNPM_VERSION: ${{ vars.RUNTIME_PNPM_VERSION }}
+          DEFAULT_DATA_FORMAT_ID: ${{ vars.RUNTIME_DATA_FORMAT_ID }}
+          DEFAULT_DATA_FORMAT_COMPATIBLE_WITH: ${{ vars.RUNTIME_DATA_FORMAT_COMPATIBLE_WITH }}
+          DEFAULT_DATA_FORMAT_MIGRATION: ${{ vars.RUNTIME_DATA_FORMAT_MIGRATION }}
+          UPSTREAM_REPOSITORY: deepseek-ai/deepseek-harness
+          UPSTREAM_RELEASE_TAG_PREFIX: dsh-v
+        run: |
+          set -euo pipefail
+
+          should_build=true
+          runtime_version="$DISPATCH_RUNTIME_VERSION"
+          harness_version="$DISPATCH_HARNESS_VERSION"
+          pnpm_version="${DISPATCH_PNPM_VERSION:-$DEFAULT_PNPM_VERSION}"
+          data_format_id="${DISPATCH_DATA_FORMAT_ID:-$DEFAULT_DATA_FORMAT_ID}"
+          data_format_compatible_with="${DISPATCH_DATA_FORMAT_COMPATIBLE_WITH:-$DEFAULT_DATA_FORMAT_COMPATIBLE_WITH}"
+          data_format_migration="${DISPATCH_DATA_FORMAT_MIGRATION:-$DEFAULT_DATA_FORMAT_MIGRATION}"
+
+          case "$EVENT_NAME" in
+            schedule)
+              release="$(
+                gh api "repos/$UPSTREAM_REPOSITORY/releases?per_page=100" --paginate --slurp |
+                  jq -r '
+                    add
+                    | map(select(.draft == false))
+                    | map(select(.tag_name | test("^dsh-v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$")))
+                    | sort_by(.published_at // .created_at)
+                    | last
+                    | [.tag_name, (.published_at // .created_at)]
+                    | @tsv
+                  '
+              )"
+              IFS=$'\t' read -r upstream_tag upstream_published_at <<< "$release"
+              if [ -z "${upstream_tag:-}" ] || [ "$upstream_tag" = "null" ]; then
+                echo "No published official Harness release matched dsh-vX.Y.Z..."
+                should_build=false
+              else
+                harness_version="${upstream_tag#"$UPSTREAM_RELEASE_TAG_PREFIX"}"
+                runtime_version="${harness_version}-ver1"
+                runtime_tag="runtime-${runtime_version}"
+                if gh release view "$runtime_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                  echo "Runtime release $runtime_tag already exists; skipping Harness release $upstream_tag ($upstream_published_at)."
+                  should_build=false
+                else
+                  echo "New official Harness release $upstream_tag ($upstream_published_at); building $runtime_tag."
+                fi
+              fi
+              ;;
+            workflow_dispatch)
+              [ -n "$runtime_version" ] || {
+                echo "runtime_version is required for workflow_dispatch" >&2
+                exit 1
+              }
+              ;;
+            push)
+              runtime_version="${EVENT_REF_NAME#runtime-}"
+              ;;
+            *)
+              echo "Unsupported event: $EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ "$should_build" = true ]; then
+            runtime_pattern='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?-ver[1-9][0-9]*$'
+            if [[ ! "$runtime_version" =~ $runtime_pattern ]]; then
+              echo "Runtime version must use the form <HarnessVersion>-verN: $runtime_version" >&2
+              exit 1
+            fi
+            [ -n "$data_format_id" ] || {
+              echo "RUNTIME_DATA_FORMAT_ID is required; configure the repository variable or dispatch input" >&2
+              exit 1
+            }
+          fi
+
+          {
+            echo "should_build=$should_build"
+            echo "runtime_version=$runtime_version"
+            echo "harness_version=$harness_version"
+            echo "pnpm_version=$pnpm_version"
+            echo "runtime_data_format_id=$data_format_id"
+            echo "runtime_data_format_compatible_with=$data_format_compatible_with"
+            echo "runtime_data_format_migration=$data_format_migration"
+          } >> "$GITHUB_OUTPUT"
+
   build:
+    if: needs.prepare.outputs.should_build == 'true'
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -55,20 +172,14 @@ jobs:
 
       - name: Build and smoke-test Runtime
         env:
-          RUNTIME_DATA_FORMAT_ID: ${{ inputs.runtime_data_format_id || vars.RUNTIME_DATA_FORMAT_ID }}
-          RUNTIME_DATA_FORMAT_COMPATIBLE_WITH: ${{ inputs.runtime_data_format_compatible_with || vars.RUNTIME_DATA_FORMAT_COMPATIBLE_WITH }}
-          RUNTIME_DATA_FORMAT_MIGRATION: ${{ inputs.runtime_data_format_migration || vars.RUNTIME_DATA_FORMAT_MIGRATION }}
-          RUNTIME_HARNESS_VERSION: ${{ inputs.harness_version }}
-          RUNTIME_PNPM_VERSION: ${{ inputs.pnpm_version || vars.RUNTIME_PNPM_VERSION }}
+          RUNTIME_DATA_FORMAT_ID: ${{ needs.prepare.outputs.runtime_data_format_id }}
+          RUNTIME_DATA_FORMAT_COMPATIBLE_WITH: ${{ needs.prepare.outputs.runtime_data_format_compatible_with }}
+          RUNTIME_DATA_FORMAT_MIGRATION: ${{ needs.prepare.outputs.runtime_data_format_migration }}
+          RUNTIME_HARNESS_VERSION: ${{ needs.prepare.outputs.harness_version }}
+          RUNTIME_PNPM_VERSION: ${{ needs.prepare.outputs.pnpm_version }}
+          RUNTIME_VERSION_INPUT: ${{ needs.prepare.outputs.runtime_version }}
         run: |
-          if [ -z "${RUNTIME_DATA_FORMAT_ID:-}" ]; then
-            echo "RUNTIME_DATA_FORMAT_ID is required; publish a machine-readable data contract" >&2
-            exit 1
-          fi
-          runtime_version="${{ inputs.runtime_version }}"
-          if [ -z "$runtime_version" ]; then
-            runtime_version="${GITHUB_REF_NAME#runtime-}"
-          fi
+          runtime_version="$RUNTIME_VERSION_INPUT"
           RUNTIME_VERSION="$runtime_version" \
           ARCHITECTURE="${{ matrix.architecture }}" \
           HARNESS_VERSION="$RUNTIME_HARNESS_VERSION" \
@@ -87,10 +198,8 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: >-
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/runtime-'))
-      || github.event_name == 'workflow_dispatch'
-    needs: build
+    if: needs.prepare.outputs.should_build == 'true'
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -110,11 +219,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUNTIME_CATALOG_KEY_ID: runtime-catalog-v1
           RUNTIME_CATALOG_PRIVATE_KEY_BASE64: ${{ secrets.RUNTIME_CATALOG_PRIVATE_KEY_BASE64 }}
+          RUNTIME_VERSION_INPUT: ${{ needs.prepare.outputs.runtime_version }}
         run: |
-          runtime_version="${{ inputs.runtime_version }}"
-          if [ -z "$runtime_version" ]; then
-            runtime_version="${GITHUB_REF_NAME#runtime-}"
-          fi
+          runtime_version="$RUNTIME_VERSION_INPUT"
           release_tag="runtime-${runtime_version}"
           ./Scripts/generate-runtime-catalog.sh \
             "$runtime_version" \

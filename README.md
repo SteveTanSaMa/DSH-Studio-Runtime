@@ -66,3 +66,10 @@ https://github.com/SteveTanSaMa/DSH-Studio-Runtime/releases/download/runtime-<ve
 会为 `darwin-arm64` 和 `darwin-x64` 分别构建，运行 smoke test，生成并签名
 catalog，然后创建对应的 Runtime Release，并更新固定的 `runtime-catalog`
 Release。
+
+workflow 还会每 15 分钟检查 DeepSeek Harness 官方仓库的已发布 Release。匹配
+`dsh-vX.Y.Z...` 的新版本会自动构造 `<HarnessVersion>-ver1`，例如
+`dsh-v0.1.1-rc.2` 对应 `0.1.1-rc.2-ver1`，然后走同一套构建、验证和发布流程。
+如果该 Runtime Release 已存在，本次检查会跳过，不会重复发布。手动
+`workflow_dispatch` 输入和 `runtime-<version>` tag 触发仍然可用；手动重新构建
+同一个 Harness 版本时可使用 `-ver2`、`-ver3` 等递增修订号。
