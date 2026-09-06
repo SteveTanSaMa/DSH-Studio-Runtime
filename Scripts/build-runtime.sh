@@ -248,7 +248,6 @@ ARTIFACT_PATH="$OUTPUT_DIR/$ARTIFACT_NAME"
 tar -czf "$ARTIFACT_PATH" -C "$STAGE_DIR" manifest.json node harness
 ARTIFACT_SHA256="$(shasum -a 256 "$ARTIFACT_PATH" | awk '{print $1}')"
 export DSH_RUNTIME_ARTIFACT_SHA256="$ARTIFACT_SHA256"
-printf '%s  %s\n' "$ARTIFACT_SHA256" "$ARTIFACT_NAME" > "$ARTIFACT_PATH.sha256"
 cp "$STAGE_DIR/manifest.json" "$OUTPUT_DIR/manifest-$RUNTIME_VERSION-$ARCHITECTURE.json"
 
 "$NODE_EXECUTABLE" - \

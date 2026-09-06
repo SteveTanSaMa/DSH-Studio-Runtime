@@ -12,7 +12,7 @@
 - `Scripts/generate-runtime-catalog.sh`：合并两个架构的 artifact metadata。
 - `Scripts/sign-runtime-catalog.sh`：使用 Ed25519 私钥签名 catalog。
 
-构建产生的压缩包、校验文件和 catalog 只作为 GitHub Actions artifact 或
+构建产生的压缩包、manifest、artifact metadata 和 catalog 只作为 GitHub Actions artifact 或
 GitHub Release 资产发布，不提交到 Git 源码仓库。
 
 ## 命名规范
@@ -67,7 +67,7 @@ https://github.com/SteveTanSaMa/DSH-Studio-Runtime/releases/download/runtime-<ve
 catalog，然后创建对应的 Runtime Release，并更新固定的 `runtime-catalog`
 Release。
 
-workflow 还会每 15 分钟检查 DeepSeek Harness 官方仓库的已发布 Release。匹配
+workflow 还会每小时检查 DeepSeek Harness 官方仓库的已发布 Release。匹配
 `dsh-vX.Y.Z...` 的新版本会自动构造 `<HarnessVersion>-ver1`，例如
 `dsh-v0.1.1-rc.2` 对应 `0.1.1-rc.2-ver1`，然后走同一套构建、验证和发布流程。
 如果该 Runtime Release 已存在，本次检查会跳过，不会重复发布。手动

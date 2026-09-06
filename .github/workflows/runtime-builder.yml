@@ -30,7 +30,7 @@ on:
   schedule:
     # GitHub Actions has no native cross-repository release trigger. Poll the
     # official Harness releases and build only when a new version is found.
-    - cron: "*/15 * * * *"
+    - cron: "17 * * * *"
   push:
     tags:
       - "runtime-*"
@@ -86,31 +86,39 @@ jobs:
 
           case "$EVENT_NAME" in
             schedule)
-              release="$(
-                gh api "repos/$UPSTREAM_REPOSITORY/releases?per_page=100" --paginate --slurp |
-                  jq -r '
-                    add
-                    | map(select(.draft == false))
-                    | map(select(.tag_name | test("^dsh-v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$")))
-                    | sort_by(.published_at // .created_at)
-                    | last
-                    | [.tag_name, (.published_at // .created_at)]
-                    | @tsv
-                  '
-              )"
-              IFS=$'\t' read -r upstream_tag upstream_published_at <<< "$release"
-              if [ -z "${upstream_tag:-}" ] || [ "$upstream_tag" = "null" ]; then
-                echo "No published official Harness release matched dsh-vX.Y.Z..."
+              if [ -z "$data_format_id" ]; then
+                echo "::warning::Scheduled Runtime check skipped because RUNTIME_DATA_FORMAT_ID is not configured."
                 should_build=false
               else
-                harness_version="${upstream_tag#"$UPSTREAM_RELEASE_TAG_PREFIX"}"
-                runtime_version="${harness_version}-ver1"
-                runtime_tag="runtime-${runtime_version}"
-                if gh release view "$runtime_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-                  echo "Runtime release $runtime_tag already exists; skipping Harness release $upstream_tag ($upstream_published_at)."
+                release="$(
+                  gh api "repos/$UPSTREAM_REPOSITORY/releases?per_page=100" --paginate --slurp |
+                    jq -r '
+                      add
+                      | map(select(.draft == false))
+                      | map(select(.tag_name | test("^dsh-v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$")))
+                      | sort_by(.published_at // .created_at)
+                      | last
+                      | [.tag_name, (.published_at // .created_at)]
+                      | @tsv
+                    '
+                )"
+                IFS=$'\t' read -r upstream_tag upstream_published_at <<< "$release"
+                if [ -z "${upstream_tag:-}" ] || [ "$upstream_tag" = "null" ]; then
+                  echo "No published official Harness release matched dsh-vX.Y.Z..."
                   should_build=false
                 else
-                  echo "New official Harness release $upstream_tag ($upstream_published_at); building $runtime_tag."
+                  harness_version="${upstream_tag#"$UPSTREAM_RELEASE_TAG_PREFIX"}"
+                  runtime_version="${harness_version}-ver1"
+                  runtime_tag="runtime-${runtime_version}"
+                  if ! npm view "@deepseek-ai/dsh@$harness_version" version --registry "https://registry.npmjs.org" >/dev/null 2>&1; then
+                    echo "::warning::Skipping Harness release $upstream_tag because @deepseek-ai/dsh@$harness_version is not published on npm."
+                    should_build=false
+                  elif gh release view "$runtime_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                    echo "Runtime release $runtime_tag already exists; skipping Harness release $upstream_tag ($upstream_published_at)."
+                    should_build=false
+                  else
+                    echo "New official Harness release $upstream_tag ($upstream_published_at); building $runtime_tag."
+                  fi
                 fi
               fi
               ;;
