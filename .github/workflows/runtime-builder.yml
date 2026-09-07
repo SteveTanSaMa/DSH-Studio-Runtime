@@ -90,35 +90,40 @@ jobs:
                 echo "::warning::Scheduled Runtime check skipped because RUNTIME_DATA_FORMAT_ID is not configured."
                 should_build=false
               else
-                release="$(
+                releases="$(
                   gh api "repos/$UPSTREAM_REPOSITORY/releases?per_page=100" --paginate --slurp |
                     jq -r '
                       add
                       | map(select(.draft == false))
                       | map(select(.tag_name | test("^dsh-v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$")))
                       | sort_by(.published_at // .created_at)
-                      | last
+                      | .[]
                       | [.tag_name, (.published_at // .created_at)]
                       | @tsv
                     '
                 )"
-                IFS=$'\t' read -r upstream_tag upstream_published_at <<< "$release"
-                if [ -z "${upstream_tag:-}" ] || [ "$upstream_tag" = "null" ]; then
-                  echo "No published official Harness release matched dsh-vX.Y.Z..."
-                  should_build=false
-                else
+                runtime_version=""
+                harness_version=""
+                while IFS=$'\t' read -r upstream_tag upstream_published_at; do
+                  [ -n "${upstream_tag:-}" ] || continue
                   harness_version="${upstream_tag#"$UPSTREAM_RELEASE_TAG_PREFIX"}"
-                  runtime_version="${harness_version}-ver1"
-                  runtime_tag="runtime-${runtime_version}"
+                  candidate_runtime_version="${harness_version}-ver1"
+                  runtime_tag="runtime-${candidate_runtime_version}"
+                  if gh release view "$runtime_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                    echo "Runtime release $runtime_tag already exists; skipping Harness release $upstream_tag ($upstream_published_at)."
+                    continue
+                  fi
                   if ! npm view "@deepseek-ai/dsh@$harness_version" version --registry "https://registry.npmjs.org" >/dev/null 2>&1; then
                     echo "::warning::Skipping Harness release $upstream_tag because @deepseek-ai/dsh@$harness_version is not published on npm."
-                    should_build=false
-                  elif gh release view "$runtime_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-                    echo "Runtime release $runtime_tag already exists; skipping Harness release $upstream_tag ($upstream_published_at)."
-                    should_build=false
-                  else
-                    echo "New official Harness release $upstream_tag ($upstream_published_at); building $runtime_tag."
+                    continue
                   fi
+                  runtime_version="$candidate_runtime_version"
+                  echo "New official Harness release $upstream_tag ($upstream_published_at); building $runtime_tag."
+                  break
+                done <<< "$releases"
+                if [ -z "$runtime_version" ]; then
+                  echo "No unbuilt official Harness release with a published npm package was found."
+                  should_build=false
                 fi
               fi
               ;;
@@ -147,6 +152,17 @@ jobs:
               echo "RUNTIME_DATA_FORMAT_ID is required; configure the repository variable or dispatch input" >&2
               exit 1
             }
+
+            if [ -z "$harness_version" ]; then
+              harness_version="${runtime_version%-ver[1-9]*}"
+            fi
+            if ! npm view "@deepseek-ai/dsh@$harness_version" version --registry "https://registry.npmjs.org" >/dev/null 2>&1; then
+              echo "::warning::Skipping $runtime_version because @deepseek-ai/dsh@$harness_version is not published on npm."
+              should_build=false
+            elif gh release view "runtime-$runtime_version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Runtime release runtime-$runtime_version already exists; skipping duplicate build."
+              should_build=false
+            fi
           fi
 
           {
