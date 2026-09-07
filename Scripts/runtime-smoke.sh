@@ -73,19 +73,25 @@ trap cleanup EXIT
     DSH_HOME="$DSH_HOME" \
     DSH_TELEMETRY_DISABLED=1 \
     PATH="$(dirname "$NODE_EXECUTABLE"):$(dirname "$PNPM_EXECUTABLE"):$PATH" \
-        "$NODE_EXECUTABLE" "$HARNESS_ENTRY" web --host 127.0.0.1 --port 0
+        "$NODE_EXECUTABLE" "$HARNESS_ENTRY" web --host 127.0.0.1 --port 0 --no-open
 ) >"$LOG_FILE" 2>&1 &
 HARNESS_PID=$!
 
 READY_URL=""
 HEALTHY=0
+COOKIE_JAR="$TEMP_ROOT/cookies.txt"
 for _ in $(seq 1 120); do
-    READY_URL="$(sed -n 's/.*\(http:\/\/127\.0\.0\.1:[0-9][0-9]*\).*/\1/p' "$LOG_FILE" | tail -n 1 || true)"
+    READY_URL="$(sed -n 's/.*\(http:\/\/127\.0\.0\.1:[0-9][0-9]*\/?token=[^[:space:]]*\).*/\1/p' "$LOG_FILE" | tail -n 1 || true)"
     if [ -n "$READY_URL" ]; then
-        if curl -fsS -X POST \
+        READY_BASE_URL="$(printf '%s' "$READY_URL" | sed 's#/?token=.*##')"
+        if curl -fsS \
+            -c "$COOKIE_JAR" \
+            "$READY_URL" >/dev/null && \
+            curl -fsS -X POST \
+            -b "$COOKIE_JAR" \
             -H 'Content-Type: application/json' \
-            --data '{"type":"client-request","rpcId":"runtime-smoke","method":"host.describe","payload":{}}' \
-            "$READY_URL/api/host.describe" > "$RESPONSE_FILE"; then
+            --data '{"type":"client-request","rpcId":"runtime-smoke","method":"settings/describe","payload":{"args":{}}}' \
+            "$READY_BASE_URL/api/settings/describe" > "$RESPONSE_FILE"; then
             if node -e '
 const fs = require("fs");
 const response = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -103,7 +109,7 @@ if (!response.result || response.result.ok !== true) process.exit(1);
 done
 
 if [ "$HEALTHY" -ne 1 ]; then
-    printf 'runtime-smoke: Harness did not pass host.describe\n' >&2
+    printf 'runtime-smoke: Harness did not pass settings/describe\n' >&2
     sed -n '1,240p' "$LOG_FILE" >&2 || true
     exit 1
 fi
