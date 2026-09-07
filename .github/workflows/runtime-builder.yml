@@ -73,6 +73,7 @@ jobs:
           DEFAULT_DATA_FORMAT_MIGRATION: ${{ vars.RUNTIME_DATA_FORMAT_MIGRATION }}
           UPSTREAM_REPOSITORY: deepseek-ai/deepseek-harness
           UPSTREAM_RELEASE_TAG_PREFIX: dsh-v
+          UPSTREAM_MIN_HARNESS_VERSION: 0.1.1-rc.2
         run: |
           set -euo pipefail
 
@@ -104,9 +105,15 @@ jobs:
                 )"
                 runtime_version=""
                 harness_version=""
+                baseline_reached=false
                 while IFS=$'\t' read -r upstream_tag upstream_published_at; do
                   [ -n "${upstream_tag:-}" ] || continue
                   harness_version="${upstream_tag#"$UPSTREAM_RELEASE_TAG_PREFIX"}"
+                  if [ "$harness_version" = "$UPSTREAM_MIN_HARNESS_VERSION" ]; then
+                    baseline_reached=true
+                    continue
+                  fi
+                  [ "$baseline_reached" = true ] || continue
                   candidate_runtime_version="${harness_version}-ver1"
                   runtime_tag="runtime-${candidate_runtime_version}"
                   if gh release view "$runtime_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

@@ -72,7 +72,7 @@ Release。
 workflow 还会每小时检查 DeepSeek Harness 官方仓库的已发布 Release。匹配
 `dsh-vX.Y.Z...` 的版本会自动构造 `<HarnessVersion>-ver1`，例如
 `dsh-v0.1.1-rc.2` 对应 `0.1.1-rc.2-ver1`，然后走同一套构建、验证和发布流程。
-检查会按发布时间补查所有尚未生成的版本；如果对应的 npm 包尚未发布，会暂时跳过，
+检查会从 `0.1.1-rc.2` 之后按发布时间补查所有尚未生成的版本；如果对应的 npm 包尚未发布，会暂时跳过，
 待后续检查发现 npm 包后再构建。如果该 Runtime Release 已存在，本次检查会跳过，
 不会重复发布。手动 `workflow_dispatch` 输入和 `runtime-<version>` tag 触发仍然可用；
 手动重新构建同一个 Harness 版本时可使用 `-ver2`、`-ver3` 等递增修订号。
