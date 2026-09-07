@@ -176,15 +176,20 @@ printf 'Resolving Harness %s and pnpm %s\n' "$HARNESS_VERSION" "$PNPM_VERSION"
 # depends on fs-ext, a native module that ships no prebuilt binding and is
 # built by its install script. Keep --ignore-scripts for the rest of the tree,
 # but compile just this module here so the packaged Runtime boots on macOS.
+# node-gyp's shebang runs "env node", so the downloaded Node must lead PATH;
+# otherwise the hosted runner's own Node builds the binding against a
+# different NODE_MODULE_VERSION and dlopen fails at boot.
 if [ -d "$HARNESS_ROOT/node_modules/fs-ext" ] &&
    [ ! -f "$HARNESS_ROOT/node_modules/fs-ext/build/Release/fs_ext.node" ]; then
     printf 'Compiling fs-ext native binding for %s\n' "$ARCHITECTURE"
     (
         cd "$HARNESS_ROOT"
-        "$NODE_EXECUTABLE" "$NPM_CLI" rebuild fs-ext
+        PATH="$(dirname "$NODE_EXECUTABLE"):$PATH" \
+            "$NODE_EXECUTABLE" "$NPM_CLI" rebuild fs-ext
     )
-    [ -f "$HARNESS_ROOT/node_modules/fs-ext/build/Release/fs_ext.node" ] || die \
-        "fs-ext native binding is still missing after rebuild"
+    "$NODE_EXECUTABLE" -e 'require(process.argv[1])' \
+        "$HARNESS_ROOT/node_modules/fs-ext" || die \
+        "fs-ext native binding failed to load after rebuild"
 fi
 
 HARNESS_ENTRY="$HARNESS_ROOT/node_modules/@deepseek-ai/dsh/lib/bin.js"
