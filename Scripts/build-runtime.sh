@@ -172,6 +172,21 @@ printf 'Resolving Harness %s and pnpm %s\n' "$HARNESS_VERSION" "$PNPM_VERSION"
         --registry "$REGISTRY"
 )
 
+# @deepseek-ai/dsh-session-persistence-jsonl (added in Harness 0.1.3-alpha.2)
+# depends on fs-ext, a native module that ships no prebuilt binding and is
+# built by its install script. Keep --ignore-scripts for the rest of the tree,
+# but compile just this module here so the packaged Runtime boots on macOS.
+if [ -d "$HARNESS_ROOT/node_modules/fs-ext" ] &&
+   [ ! -f "$HARNESS_ROOT/node_modules/fs-ext/build/Release/fs_ext.node" ]; then
+    printf 'Compiling fs-ext native binding for %s\n' "$ARCHITECTURE"
+    (
+        cd "$HARNESS_ROOT"
+        "$NODE_EXECUTABLE" "$NPM_CLI" rebuild fs-ext
+    )
+    [ -f "$HARNESS_ROOT/node_modules/fs-ext/build/Release/fs_ext.node" ] || die \
+        "fs-ext native binding is still missing after rebuild"
+fi
+
 HARNESS_ENTRY="$HARNESS_ROOT/node_modules/@deepseek-ai/dsh/lib/bin.js"
 PNPM_PACKAGE="$HARNESS_ROOT/node_modules/pnpm/package.json"
 PNPM_EXECUTABLE="$HARNESS_ROOT/node_modules/.bin/pnpm"
