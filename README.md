@@ -8,12 +8,14 @@
 
 - `.github/workflows/runtime-builder.yml`：按架构构建并发布 Runtime。
 - `Scripts/build-runtime.sh`：下载固定 Node.js、解析 Harness/pnpm 依赖、生成 Runtime artifact。
-- `Scripts/runtime-smoke.sh`：启动 Harness 并执行 `host.describe` smoke test。
+- `Scripts/runtime-smoke.sh`：启动 Harness 并执行 `settings/describe` smoke test。
 - `Scripts/generate-runtime-catalog.sh`：合并两个架构的 artifact metadata。
 - `Scripts/sign-runtime-catalog.sh`：使用 Ed25519 私钥签名 catalog。
 
 构建产生的压缩包、manifest、artifact metadata 和 catalog 只作为 GitHub Actions artifact 或
-GitHub Release 资产发布，不提交到 Git 源码仓库。
+GitHub Release 资产发布，不提交到 Git 源码仓库。Runtime 不再额外生成
+`*.tar.gz.sha256` 文件；GitHub Release 会显示每个附件的 SHA-256，用户可以直接复制。
+但 artifact metadata 和签名 catalog 中仍保留 SHA-256，用于 DSH Studio 下载时自动校验。
 
 ## 命名规范
 
