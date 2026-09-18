@@ -11,6 +11,7 @@
 - `Scripts/runtime-smoke.sh`：启动 Harness 并执行 `settings/describe` smoke test。
 - `Scripts/generate-runtime-catalog.sh`：合并两个架构的 artifact metadata。
 - `Scripts/sign-runtime-catalog.sh`：使用 Ed25519 私钥签名 catalog。
+- `docs/runtime-catalog-keys.md`：签名私钥与 App 公钥的对应关系、校验和轮换步骤。
 
 构建产生的压缩包、manifest、artifact metadata 和 catalog 只作为 GitHub Actions artifact 或
 GitHub Release 资产发布，不提交到 Git 源码仓库。Runtime 不再额外生成
@@ -60,6 +61,9 @@ RUNTIME_CATALOG_PRIVATE_KEY_BASE64
 https://github.com/SteveTanSaMa/DSH-Studio-Runtime/releases/download/runtime-catalog/runtime-catalog.signed.json
 https://github.com/SteveTanSaMa/DSH-Studio-Runtime/releases/download/runtime-<version>/dsh-runtime-<version>-<architecture>.tar.gz
 ```
+
+私钥与 App 公钥必须始终是同一对密钥，否则 App 会拒绝所有 catalog。校验方法、
+轮换步骤和密钥对应关系见 [`docs/runtime-catalog-keys.md`](docs/runtime-catalog-keys.md)。
 
 ## 触发构建
 
