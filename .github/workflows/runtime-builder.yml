@@ -252,8 +252,49 @@ jobs:
           RUNTIME_CATALOG_PRIVATE_KEY_BASE64: ${{ secrets.RUNTIME_CATALOG_PRIVATE_KEY_BASE64 }}
           RUNTIME_VERSION_INPUT: ${{ needs.prepare.outputs.runtime_version }}
         run: |
+          set -euo pipefail
+
           runtime_version="$RUNTIME_VERSION_INPUT"
           release_tag="runtime-${runtime_version}"
+          upload_attempts=5
+
+          upload_asset() {
+            # uploads.github.com intermittently answers HTTP 500 for large
+            # assets. An aborted upload leaves the release behind, and the
+            # release tag then makes every later run skip that Runtime version,
+            # so retry here instead of failing the whole publish.
+            local release_tag="$1" file="$2" label="$3"
+            shift 3
+            local name size attempt=1 delay=15 remote
+            name="$(basename "$file")"
+            size="$(wc -c < "$file" | tr -d '[:space:]')"
+            while [ "$attempt" -le "$upload_attempts" ]; do
+              echo "Uploading $label $name ($size bytes), attempt $attempt/$upload_attempts"
+              if gh release upload "$release_tag" "$file" --repo "$GITHUB_REPOSITORY" --clobber "$@"; then
+                # A truncated upload can still return success, and the release
+                # is immutable once clients recorded its checksum, so assert the
+                # stored asset size before moving on.
+                remote="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$release_tag" \
+                  --jq ".assets[] | select(.name == \"${name}\") | .size" | head -1)"
+                if [ "$remote" = "$size" ]; then
+                  echo "Verified $name ($remote bytes)"
+                  return 0
+                fi
+                echo "::warning::$name stored size ${remote:-<missing>} does not match local size $size" >&2
+              else
+                echo "::warning::Upload attempt $attempt for $name failed" >&2
+              fi
+              attempt=$((attempt + 1))
+              if [ "$attempt" -le "$upload_attempts" ]; then
+                echo "Retrying $name in ${delay}s"
+                sleep "$delay"
+                delay=$((delay * 2))
+              fi
+            done
+            echo "Failed to upload $name after $upload_attempts attempts" >&2
+            return 1
+          }
+
           ./Scripts/generate-runtime-catalog.sh \
             "$runtime_version" \
             RuntimeArtifacts/runtime-release.json \
@@ -261,20 +302,32 @@ jobs:
           ./Scripts/sign-runtime-catalog.sh \
             RuntimeArtifacts/runtime-release.json \
             RuntimeArtifacts/runtime-catalog.signed.json
-          gh release create "$release_tag" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "Runtime $release_tag" \
-            --generate-notes
-          gh release upload "$release_tag" RuntimeArtifacts/* \
-            --repo "$GITHUB_REPOSITORY"
+
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $release_tag already exists; completing it instead of recreating it."
+          else
+            gh release create "$release_tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Runtime $release_tag" \
+              --generate-notes
+          fi
+
+          # Publish the large immutable payloads first. They are what the
+          # catalog advertises, so the catalog must never mention a Runtime
+          # whose artifacts are not downloadable yet.
+          for file in RuntimeArtifacts/dsh-runtime-*.tar.gz; do
+            upload_asset "$release_tag" "$file" artifact
+          done
+          for file in RuntimeArtifacts/artifact-*.json RuntimeArtifacts/manifest-*.json; do
+            upload_asset "$release_tag" "$file" metadata
+          done
+          upload_asset "$release_tag" RuntimeArtifacts/runtime-release.json metadata
+
           if ! gh release view runtime-catalog --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create runtime-catalog \
               --repo "$GITHUB_REPOSITORY" \
               --title "Runtime catalog" \
               --notes "Signed Runtime catalog for DSH Studio automatic discovery."
           fi
-          gh release upload runtime-catalog \
-            RuntimeArtifacts/runtime-catalog.signed.json \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
+          upload_asset runtime-catalog RuntimeArtifacts/runtime-catalog.signed.json catalog
