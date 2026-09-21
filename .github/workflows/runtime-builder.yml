@@ -303,13 +303,18 @@ jobs:
             RuntimeArtifacts/runtime-release.json \
             RuntimeArtifacts/runtime-catalog.signed.json
 
+          # The title is the version without the tag's "runtime-" prefix, which
+          # already carries it; "Runtime $release_tag" rendered as the redundant
+          # "Runtime runtime-<version>". The tag and asset names stay as they are,
+          # because the app validates that URL shape and published catalogs
+          # already reference it.
           if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $release_tag already exists; completing it instead of recreating it."
           else
             gh release create "$release_tag" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "Runtime $release_tag" \
+              --title "Runtime ${runtime_version}" \
               --generate-notes
           fi
 
