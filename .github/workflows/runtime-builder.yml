@@ -85,7 +85,12 @@ jobs:
           DEFAULT_DATA_FORMAT_MIGRATION: ${{ vars.RUNTIME_DATA_FORMAT_MIGRATION }}
           UPSTREAM_REPOSITORY: deepseek-ai/deepseek-harness
           UPSTREAM_RELEASE_TAG_PREFIX: dsh-v
-          UPSTREAM_MIN_HARNESS_VERSION: 0.1.1-rc.2
+          # Everything at or before this version is treated as already handled.
+          # Keep it on the last Harness version that cannot be rebuilt with
+          # today's dependency graph (see docs/historical-versions.md): moving it
+          # forward would make the poll try that version forever and never reach
+          # a newer one.
+          UPSTREAM_MIN_HARNESS_VERSION: 0.1.7-rc.2
         run: |
           set -euo pipefail
 

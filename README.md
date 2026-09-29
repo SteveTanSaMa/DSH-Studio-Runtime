@@ -117,6 +117,7 @@ SHA-256                 ← artifact 身份：重新打包换的是这个值，�
 | `keys/runtime-catalog-public.txt` | 公开的信任锚：keyID + Ed25519 公钥 |
 | `docs/runtime-contract.md` | 与 DSH Studio 之间的契约（schema、URL、语义） |
 | `docs/versioning.md` | 版本规则的权威说明（已冻结） |
+| `docs/historical-versions.md` | 哪些 Harness 版本可以重建（当前从 `0.2.0-rc.1` 起）及证据 |
 | `docs/runtime-catalog-keys.md` | 私钥与 App 公钥的对应关系、轮换步骤 |
 
 构建产物（压缩包、manifest、artifact metadata、catalog）只作为 GitHub Actions artifact
@@ -359,6 +360,11 @@ Environment 与 secret：
 细节见 [`docs/runtime-contract.md`](docs/runtime-contract.md)。
 
 ## 已知限制
+
+- **历史 Harness 版本无法重建**：每次构建都重新解析依赖图，宽松的依赖范围会解析出当年之后
+  才发布的传递依赖（例如为 `0.1.5-alpha.2` 构建时装入 `dsh-sandbox-local@0.1.5-rc.3`），
+  混合图不稳定。实测 0.1.5 之前的多个版本今天已无法启动，因此正式发布从 `0.2.0-rc.1` 开始；
+  细节与证据见 [`docs/historical-versions.md`](docs/historical-versions.md)。
 
 - **不宣称字节级可复现**：传递依赖仍由 registry 解析，打包时间戳等也随构建变化。
   身份与完整性靠“catalog 记录实际 artifact 的 SHA-256 + 客户端逐字节校验（失败即关闭）”
