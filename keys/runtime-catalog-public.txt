@@ -1,0 +1,12 @@
+# Public trust anchor for the signed Runtime catalog.
+#
+# keyID identifies the catalog signing key. publicKey is the base64-encoded raw
+# Ed25519 public key (32 bytes); the private half lives in the GitHub Actions
+# environment secret RUNTIME_CATALOG_PRIVATE_KEY_BASE64 and is never committed.
+#
+# publicKey must always equal RUNTIME_CATALOG_PUBLIC_KEY in the DSH Studio app
+# target, otherwise every shipped client rejects the catalog. The release
+# pipeline verifies that the signing key derives exactly this key before it
+# publishes a catalog, and verifies the published catalog against it afterwards.
+keyID=runtime-catalog-v1
+publicKey=0GEkmYgsy2J3W/antboIWqsObDt0I8tWPJ87vTqQsmk=

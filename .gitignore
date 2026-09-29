@@ -1,7 +1,17 @@
 .DS_Store
+# Build output: archives, manifests, artifact metadata and catalogs are published
+# as GitHub release assets, never committed.
 RuntimeArtifacts/
+runtime-release.json
+
+# Local tooling state.
+.commandcode/
 
 # Local signing material must never enter the repository.
 *.pem
 *.key
+*.der
+*.b64
+*.p8
+*.pkcs8
 runtime-catalog.signed.json

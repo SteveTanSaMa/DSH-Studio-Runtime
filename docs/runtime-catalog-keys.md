@@ -1,55 +1,62 @@
 # Runtime catalog signing keys
 
-DSH Studio only trusts a Runtime catalog that is signed by one specific Ed25519
-key. That key exists in two halves, in two different repositories, and the two
-halves **must always describe the same keypair**:
+DSH Studio 只信任由一对特定 Ed25519 密钥签名的 Runtime catalog。这对密钥分处两地，
+两半**必须始终描述同一对密钥**：
 
-| Half | Where it lives | Purpose |
+| 半 | 位置 | 用途 |
 | --- | --- | --- |
-| Private key | GitHub Actions secret `RUNTIME_CATALOG_PRIVATE_KEY_BASE64` in `SteveTanSaMa/DSH-Studio-Runtime` | Signs the catalog during release |
-| Public key | `RUNTIME_CATALOG_PUBLIC_KEY` in the DSH Studio target of `DSH Studio.xcodeproj/project.pbxproj` (Debug **and** Release), surfaced through `Info.plist` | `RuntimeCatalogTrust` trust anchor |
+| 私钥 | GitHub Actions environment `runtime-signing` 中的 secret `RUNTIME_CATALOG_PRIVATE_KEY_BASE64`（仓库 `SteveTanSaMa/DSH-Studio-Runtime`） | 发布时签名 catalog |
+| 公钥 | 本仓库 [`keys/runtime-catalog-public.txt`](../keys/runtime-catalog-public.txt)，以及 DSH Studio target 的 `RUNTIME_CATALOG_PUBLIC_KEY`（`DSH Studio.xcodeproj/project.pbxproj`，Debug **和** Release，经 `Info.plist` 暴露） | 客户端的信任锚 |
 
-Signing is supplied to the workflow as base64-encoded **PKCS#8 DER** bytes. The
-workflow signs on every release; no local key is needed for routine work.
+签名素材以 base64 编码的 **PKCS#8 DER** 字节提供。发布流水线每次都会签名，日常开发不需要
+本地私钥。
 
-## The invariant
+两个 job 的分工是刻意的：构建 job 不引用 `runtime-signing` environment，因此拿不到私钥；
+只有 publish job 能看到它，且该 environment 会为每次发布留下审计记录。
 
-The base64 public key derived from the private key must equal the value in
-`project.pbxproj`. If they diverge, the app rejects every catalog and remote
-Runtime discovery silently stops working.
+## 不变量：签名密钥必须等于发布过的信任锚
 
-Check the current catalog against the app's trust anchor:
+signing 脚本（`Scripts/sign-runtime-catalog.sh`）要求同时提供 `RUNTIME_CATALOG_PUBLIC_KEY`，
+并在派生公钥与它不一致时**拒绝签名**。`runtime-builder.yml` 从
+`keys/runtime-catalog-public.txt` 读取这个值，所以：
+
+- 改信任锚 = 改这个文件，是一次可 review 的提交；
+- 只更新 secret 而不更新文件（或反之）会让 CI 立刻失败，而不是让已发布 App 静默失去
+  远程发现能力。
+
+## 校验当前线上 catalog
 
 ```sh
-cat > /tmp/check.js <<'JS'
-const crypto = require("crypto"), fs = require("fs");
-const env = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-const spki = Buffer.concat([
-  Buffer.from("302a300506032b6570032100", "hex"),
-  Buffer.from(process.argv[3], "base64"),
-]);
-const key = crypto.createPublicKey({ key: spki, format: "der", type: "spki" });
-console.log(crypto.verify(null, Buffer.from(env.payload, "base64"), key,
-                          Buffer.from(env.signature, "base64")));
-JS
-
-curl -sL -o /tmp/catalog.json \
-  https://github.com/SteveTanSaMa/DSH-Studio-Runtime/releases/download/runtime-catalog/runtime-catalog.signed.json
-
-node /tmp/check.js /tmp/catalog.json "$(grep -m1 RUNTIME_CATALOG_PUBLIC_KEY \
-  "DSH Studio.xcodeproj/project.pbxproj" | sed 's/.*= "//; s/";//')"
+./Scripts/verify-runtime-catalog.sh \
+    <(curl -sL https://github.com/SteveTanSaMa/DSH-Studio-Runtime/releases/download/runtime-catalog/runtime-catalog.signed.json) \
+    "$(sed -n 's/^publicKey=//p' keys/runtime-catalog-public.txt)"
 ```
 
-Any rotation must also confirm `keyID` still equals
-`RuntimeCatalogTrust.keyID` (`runtime-catalog-v1`); changing the key material
-alone does not require changing the key ID.
+验证线上 catalog 与 artifact 的完整链路（验签 + 逐个校验 SHA-256 和 URL 形状）：
 
-## Rotating the key
+```sh
+./Scripts/verify-published-runtime.sh 0.2.0-rc.1 \
+    "$(sed -n 's/^publicKey=//p' keys/runtime-catalog-public.txt)"
+```
 
-1. Generate a new Ed25519 keypair and store the private key as PKCS#8 DER,
-   base64-encoded:
+发布流水线的 `verify-published` job 每个版本都会自动跑同一套检查。
+
+确认 App 侧的值一致（在 App 仓库里执行）：
+
+```sh
+grep -m1 RUNTIME_CATALOG_PUBLIC_KEY "DSH Studio.xcodeproj/project.pbxproj"
+```
+
+`keyID` 也必须与 `RuntimeCatalogTrust.keyID`（`runtime-catalog-v1`）一致。只换密钥材料、
+不换 `keyID` 时，客户端不会因为 keyID 而拒绝，**但仍然会因为签名不匹配而拒绝**，所以两者
+必须同时更新并同时发布 App。
+
+## 轮换密钥
+
+1. 生成新的 Ed25519 密钥对，并导出 PKCS#8 DER（base64）与对应的 32 字节公钥：
 
    ```sh
+   umask 077
    node -e '
    const c = require("crypto");
    const { privateKey } = c.generateKeyPairSync("ed25519");
@@ -61,17 +68,19 @@ alone does not require changing the key ID.
    '
    ```
 
-2. Update the secret in `DSH-Studio-Runtime`.
-3. Update `RUNTIME_CATALOG_PUBLIC_KEY` for **both** Debug and Release in the
-   DSH Studio target, then ship a new app build.
-4. Publish a catalog with the new key, and verify the signature with the command
-   above before releasing the app.
+   私钥只在可信终端里出现：不要重定向到文件、不要留在 shell 历史、不要贴进 issue/PR。
 
-Keep an offline backup of the private key. GitHub secrets cannot be read back, so
-a lost private key cannot be recovered — the only fix is a full rotation.
+2. 把私钥写入 environment `runtime-signing` 的 secret `RUNTIME_CATALOG_PRIVATE_KEY_BASE64`。
+3. 更新 `keys/runtime-catalog-public.txt` 的 `publicKey`（如有必要一并更新 `keyID`）。
+4. 更新 App target 的 `RUNTIME_CATALOG_PUBLIC_KEY`（Debug 与 Release），发布新的 App 版本。
+5. 在 App 版本发布**之后**再发布使用新密钥签名的 catalog，并先跑一次
+   `Scripts/verify-published-runtime.sh` 确认签名链路。
 
-## Retired keys
+顺序上有不可消除的窗口：客户端只认内置的那一把公钥，因此“换 catalog 签名密钥”与
+“App 换信任锚”之间必然存在一段时间旧 App 无法发现新 Runtime（它们仍能用已安装的 Runtime
+和本地缓存离线工作）。所以轮换应当与一次 App 发布同步进行，而不是在 Runtime 仓库里单独完成。
 
-Superseded keypairs are kept, clearly marked, under
-`~/.config/dsh-studio/retired/` on the build machine. They must never be used to
-sign a catalog.
+## 退役密钥
+
+被替换的密钥对应放在构建机的 `~/.config/dsh-studio/retired/` 下并标注清楚，绝不用于签名
+catalog。这只是操作约定，仓库和 CI 都不依赖该目录。

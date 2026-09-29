@@ -1,0 +1,35 @@
+name: Verify Runtime tooling
+
+# Routing verification for pull requests, which never need the signing key: the
+# offline suite runs on fixtures, and this workflow deliberately declares no
+# environment and no secrets.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Same major line as the Runtime bundles, so the tooling is exercised
+          # against a Node version the distribution actually ships.
+          node-version: "24.19.0"
+
+      - name: Run the offline test suite
+        run: ./Scripts/run-tests.sh
