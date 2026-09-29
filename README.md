@@ -276,6 +276,10 @@ Release 的**标题**就是 `Runtime <Harness 版本>`，**正文**由流水线�
 platform、Node/pnpm/dataFormat/插件市场 pin、依赖 lock 哈希、各架构的 SHA-256 与大小、构建
 provenance（commit、run id），以及客户端实际使用的 catalog 地址——版本号里没有任何构建计数。
 
+每次发布结束后，流水线会把 `runtime-catalog` 重新标记为 GitHub 的 **Latest**：否则徽章会随着
+新版本发布而被带走，把 catalog 挤到列表下方。catalog 是客户端读取的入口，因此 Releases 页面
+顶部始终是它，Runtime 版本排在下面（这条只影响徽章，不动任何资产）。
+
 **失败自愈**：如果 release 已经创建但附件或 catalog 没传完，publish job 的清理步骤会删除
 这个 release 和 tag，下一次 cron/dispatch 会重新构建，不会永久卡死。若需要人工介入：
 
