@@ -528,6 +528,25 @@ expect_success_matching "notes every allowlist entry that left the dependency gr
     "protobufjs is allowlisted but no longer in the dependency graph" \
     node "$SCRIPT_DIR/audit-dependencies.js" "$WORK_DIR/audit/no-scripts.json"
 
+echo "process cleanup"
+# A leaked child is a real process, so these scenarios start real process trees
+# and watch what the shared helpers do to them.
+PROCESS_SCENARIOS="$SCRIPT_DIR/tests/process-tree-scenarios.sh"
+expect_success "records the descendant tree of a running process" \
+    "$PROCESS_SCENARIOS" records
+expect_success "reports a child that outlives its parent as a leak" \
+    "$PROCESS_SCENARIOS" detects-leak
+expect_success "stops the recorded descendants of a leaked tree" \
+    "$PROCESS_SCENARIOS" cleans-leak
+expect_success "escalates to SIGKILL for a descendant that ignores SIGTERM" \
+    "$PROCESS_SCENARIOS" escalates
+expect_success "stays best-effort when a recorded process already exited" \
+    "$PROCESS_SCENARIOS" best-effort
+expect_success "never signals a process it did not record" \
+    "$PROCESS_SCENARIOS" leaves-unrelated-alone
+expect_success "refuses to signal its own shell or an unrelated PID" \
+    "$PROCESS_SCENARIOS" protects-itself
+
 echo "plugin market pin"
 expect_success "range semantics match DSH Studio's PluginCompatibility" \
     node -e '
@@ -628,6 +647,11 @@ mv "$WORK_DIR/fake-wrong-path/node/darwin-arm64" "$WORK_DIR/fake-wrong-path/node
 expect_failure "refuses a Runtime whose layout does not match its architecture" \
     "$SCRIPT_DIR/runtime-smoke.sh" "$WORK_DIR/fake-wrong-path"
 
+make_fake_runtime "$WORK_DIR/fake-mislabelled"
+edit_json "$WORK_DIR/fake-mislabelled/manifest.json" 'value.architecture = "darwin-x64"'
+expect_failure "refuses a manifest that mislabels the architecture" \
+    "$SCRIPT_DIR/runtime-smoke.sh" "$WORK_DIR/fake-mislabelled"
+
 echo "trust anchor"
 expect_success "keys/runtime-catalog-public.txt holds a usable Ed25519 key" \
     node -e '
@@ -641,8 +665,8 @@ assert.strictEqual(Buffer.from(publicKey, "base64").length, 32, "publicKey must 
 ' "$REPOSITORY_ROOT/keys/runtime-catalog-public.txt"
 
 echo "syntax checks"
-for script in "$SCRIPT_DIR"/*.sh; do
-    expect_success "bash -n $(basename "$script")" bash -n "$script"
+for script in "$SCRIPT_DIR"/*.sh "$SCRIPT_DIR"/lib/*.sh "$SCRIPT_DIR"/tests/*.sh; do
+    expect_success "bash -n ${script#"$SCRIPT_DIR"/}" bash -n "$script"
 done
 
 printf '\n%s passed, %s failed\n' "$PASSED" "$FAILED"

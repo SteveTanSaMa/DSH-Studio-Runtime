@@ -213,7 +213,13 @@ manifest 字段与 catalog release 一致。三个层级因此落在：
   `dsh web` 进程，取决于启动环境）。因此「只对启动时拿到的那个 PID 发 SIGTERM」不保证整棵树
   退出——被 SIGTERM 的父进程退出后，子进程会被 reparent 到 launchd 并继续存活。客户端停止
   Runtime 时必须按进程组停止（或按启动时记录的 descendants 清理）。`runtime-smoke.sh` 会在
-  SIGTERM 之后断言「启动期间观察到的 descendants 全部退出」，任何残留都会失败。
+  SIGTERM 之后断言「启动期间观察到的 descendants 全部退出」，并在自己的 EXIT 清理里做兜底：
+  只对本次观察到过的 PID 依次 TERM → 短暂 grace → KILL，best-effort，绝不按名字或模式杀进程
+  （共享实现见 `Scripts/lib/process-tree.sh`，真实进程场景见
+  `Scripts/tests/process-tree-scenarios.sh`）。
+- 完整性判断：不要用「目录存在」判断 Runtime 是否可用。安装是否完整只能由 manifest 与签名
+  catalog 的比对结果决定（目录只有在 `manifest.json` 可解析、且字段与 catalog 记录一致时才可用）；
+  发布端保证 archive 内 manifest 与 catalog 一一对应，catalog 的 `sha256` 是唯一身份来源。
 - 已安装构建的身份：`runtimeVersion` 不是 artifact 身份（同版本 repack 会发布不同字节，见
   第 0 节）。客户端判断「已装了哪个构建」至少需要 `(runtimeVersion, architecture, artifact
   sha256)` 三者；只用版本号会把两个不同构建当成同一个。

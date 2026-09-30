@@ -250,6 +250,27 @@ A failure at any step produces no new usable catalog.
   badge moves to the new version and pushes the client's entry point down the list. The operation only
   affects the badge and never touches assets.
 
+### Update safety (client semantics)
+
+DSH Studio updates a Runtime in this order:
+
+```text
+download → verify (signature + SHA-256 + size) → extract → validate (manifest matches the catalog)
+        → launch → health check (settings/describe) → activate
+```
+
+**Activate must be the last step**: if `download`, `verify`, `extract`, `validate`, `launch` or the
+`health check` fails, the new Runtime is discarded and the known-good Runtime stays exactly as it was.
+
+This repository is not the installer: installing, promoting and rolling back are implemented in DSH
+Studio. What this repository owes those semantics is the publishing side — it only publishes bytes that
+were verified against the signed catalog (whose `sha256` is the artifact identity), a same-version
+repack replaces release assets without ever asking a client to delete an existing Runtime, and the
+catalog never regresses. Fault injection for the install/rollback stages therefore belongs in the app;
+everything this repository can prove about failures (checksum mismatch, corrupt archive, manifest that
+contradicts the layout, catalog downgrade, leaked process trees) lives in `Scripts/run-tests.sh` and
+`Scripts/runtime-smoke.sh`, see section 8.
+
 ## 5. Signing and keys
 
 ```text
@@ -352,7 +373,15 @@ Scripts/verify-published-runtime.sh   post-publish re-download verification (rea
 `Scripts/run-tests.sh` covers version parsing and build-input validation, catalog and metadata rules
 (including `dataFormat`, `pluginMarket`, `sha256`, `size`, and cross-architecture contract equality),
 catalog downgrade refusal, signing and envelope verification, the dependency audit, plugin-market
-range semantics and resolution, and negative cases against broken artifacts.
+range semantics and resolution, process-tree cleanup against real processes
+(`Scripts/tests/process-tree-scenarios.sh`), and negative cases against broken artifacts.
+
+Tests come in two layers so pull requests stay fast:
+
+| Layer | When | What |
+| --- | --- | --- |
+| fast (~20s, offline, no secrets) | every pull request and push to main (`verify.yml`) | all of `Scripts/run-tests.sh`: fixtures and the process-cleanup scenarios |
+| heavy (needs network and the signing environment) | release runs, manual dispatch, cron (`runtime-builder.yml`) | real builds of both architectures → smoke test on the extracted artifact → sign and publish → re-download verification from the public URLs |
 
 Smoke test checks:
 
@@ -413,7 +442,14 @@ Full fields and semantics: [`docs/runtime-contract.md`](docs/runtime-contract.md
   artifact's actual SHA-256 plus the client verifying every byte — not on rebuilds producing identical
   bytes. `dependencyLockSHA256` and `provenance` make each release traceable.
 - **The x64 Runtime is not validated on real Intel hardware**: it is built and tested on an Apple
-  Silicon runner through Rosetta, with the architecture asserted by `lipo -archs`.
+  Silicon runner through Rosetta, with the architecture asserted by `lipo -archs`. Current coverage:
+
+  | Environment | Status |
+  | --- | --- |
+  | Apple Silicon native execution | supported, exercised by every build |
+  | x86_64 Mach-O architecture validation (`lipo`) | tested |
+  | x86_64 execution under Rosetta on Apple Silicon | tested |
+  | Native Intel Mac hardware | not available (no workaround added) |
 - **The smoke test depends on upstream internal protocol**: a change to the `web` subcommand or the
   `settings/describe` RPC fails the build (intentionally fail closed) and requires updating
   `Scripts/runtime-smoke.sh`; this has already happened once.
@@ -437,6 +473,8 @@ The `docs/` files are currently Chinese only.
 | `Scripts/build-runtime.sh` | Build one architecture's artifact |
 | `Scripts/audit-dependencies.js` | Refuse unrecorded install / native build scripts in the closure |
 | `Scripts/runtime-smoke.sh` | Run the local smoke test on an extracted artifact |
+| `Scripts/lib/process-tree.sh` | Record, assert and best-effort clean up a process tree (shared by the smoke and the tests) |
+| `Scripts/tests/process-tree-scenarios.sh` | Scenarios that verify the cleanup against real processes |
 | `Scripts/generate-runtime-catalog.sh` | Merge both architectures' metadata into the catalog |
 | `Scripts/check-catalog-precedent.sh` | Refuse catalog downgrades, report same-version repacks |
 | `Scripts/sign-runtime-catalog.sh` | Sign the catalog with the Ed25519 private key |

@@ -17,6 +17,10 @@ RUNTIME_ROOT="${1:-}"
 [ -d "$RUNTIME_ROOT" ] || { printf 'runtime-smoke: root does not exist: %s\n' "$RUNTIME_ROOT" >&2; exit 1; }
 RUNTIME_ROOT="$(cd "$RUNTIME_ROOT" && pwd)"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/process-tree.sh
+. "$SCRIPT_DIR/lib/process-tree.sh"
+
 fail() {
     printf 'runtime-smoke: %s\n' "$1" >&2
     exit 1
@@ -154,13 +158,7 @@ DSH_HOME="$TEMP_ROOT/dsh-home"
 # escalated to SIGKILL.
 stop_harness() {
     [ -n "${HARNESS_PID:-}" ] || return 0
-    kill -0 "$HARNESS_PID" 2>/dev/null || return 0
-    kill -TERM "$HARNESS_PID" 2>/dev/null || true
-    for _ in $(seq 1 20); do
-        kill -0 "$HARNESS_PID" 2>/dev/null || return 0
-        sleep 0.5
-    done
-    return 1
+    ptree_stop_pid "$HARNESS_PID" 20
 }
 
 force_stop_harness() {
@@ -177,6 +175,10 @@ cleanup() {
     if [ -n "${HARNESS_PID:-}" ]; then
         wait "$HARNESS_PID" 2>/dev/null || true
     fi
+    # Also reached when a phase failed before the shutdown check, so a leaked
+    # descendant cannot survive the smoke test itself. Only PIDs this run
+    # observed are signalled, and the sweep is best-effort.
+    ptree_cleanup_recorded
     rm -rf "$TEMP_ROOT"
 }
 
@@ -184,48 +186,26 @@ cleanup() {
 # fail, so no phase can leave the directory or a Harness process behind.
 trap cleanup EXIT
 
-# Prints every descendant of a PID, children first.
-descendants_of() {
-    local parent="$1" child
-    for child in $(pgrep -P "$parent" 2>/dev/null || true); do
-        descendants_of "$child"
-        printf '%s\n' "$child"
-    done
-}
-
-# Collects the descendants seen so far. The Harness may fork a host process of
-# its own while it runs, so the set is sampled repeatedly and treated as a union:
-# a process that appeared at any point must be gone once the Harness exits, and
-# one that already exited on its own is harmless.
+# Records the processes the Harness has started right now. Sampling runs while
+# it is alive: a child that appeared at any point is recorded, and one that
+# already exited on its own is harmless.
 record_descendants() {
-    HARNESS_DESCENDANTS="$HARNESS_DESCENDANTS $(descendants_of "$HARNESS_PID" | tr '\n' ' ')"
+    local pid
+    for pid in $(ptree_descendants "$HARNESS_PID"); do
+        ptree_record "$pid"
+    done
+    return 0
 }
 
 # Verifies that the processes the Harness had started are gone after it exits.
-# The PIDs were recorded while the Harness was still running: once it exits, its
-# children are reparented and are no longer reachable from it.
 assert_no_lingering_descendants() {
-    local pid remnants recorded=0
-    HARNESS_DESCENDANTS="$(printf '%s\n' $HARNESS_DESCENDANTS | sort -u | tr '\n' ' ')"
-    for _ in $HARNESS_DESCENDANTS; do
-        recorded=$((recorded + 1))
-    done
-    for _ in $(seq 1 10); do
-        remnants=""
-        for pid in $HARNESS_DESCENDANTS; do
-            kill -0 "$pid" 2>/dev/null && remnants="$remnants $pid"
-        done
-        if [ -z "$remnants" ]; then
-            printf 'runtime-smoke: %s recorded descendant process(es), none left behind\n' \
-                "$recorded"
-            return 0
-        fi
-        sleep 0.5
-    done
-    printf 'runtime-smoke: Harness left descendant processes behind:%s\n' "$remnants" >&2
-    for pid in $remnants; do
-        ps -o pid=,ppid=,command= -p "$pid" 2>/dev/null | cut -c1-160 >&2 || true
-    done
+    if ptree_wait_until_gone 10; then
+        printf 'runtime-smoke: %s recorded descendant process(es), none left behind\n' \
+            "$(ptree_recorded_count)"
+        return 0
+    fi
+    printf 'runtime-smoke: Harness left descendant processes behind:\n' >&2
+    ptree_describe_survivors >&2
     return 1
 }
 
@@ -342,7 +322,7 @@ HARNESS_PID=$!
 
 READY_URL=""
 HEALTHY=0
-HARNESS_DESCENDANTS=""
+PTREE_RECORDED=""
 for _ in $(seq 1 120); do
     record_descendants
     READY_URL="$(sed -n 's/.*\(http:\/\/127\.0\.0\.1:[0-9][0-9]*\/?token=[^[:space:]]*\).*/\1/p' "$LOG_FILE" | tail -n 1 || true)"

@@ -236,6 +236,24 @@ verify-published（从公开 URL 重新下载，验签并校验 SHA-256）
 - 每次发布结束后，流水线把 `runtime-catalog` 重新标记为 GitHub 的 Latest：否则徽章会随新版本
   转移，把客户端入口挤到列表下方。该操作只影响徽章，不修改任何资产。
 
+### 更新安全（客户端语义）
+
+客户端更新 Runtime 的顺序是：
+
+```text
+download → verify（签名 + SHA-256 + size）→ extract → validate（manifest 与 catalog 一致）
+        → launch → health check（settings/describe）→ activate
+```
+
+**activate 必须是最后一步**：`download`、`verify`、`extract`、`validate`、`launch`、`health check`
+任一阶段失败，都只能丢弃新 Runtime，正在使用（known-good）的旧 Runtime 必须原样保留。
+
+本仓库不是安装器：安装、promote、回滚、崩溃恢复都由 DSH Studio 实现，本仓库负责「不破坏这些
+语义」——只发布经过签名与校验的字节（catalog 记录的 `sha256` 是唯一身份），同版本重新打包只替换
+release 附件，从不要求客户端删除旧 Runtime。因此上表中安装/回滚类的故障注入只能在 App 侧做；
+本仓库能自证的部分（校验和不符、损坏 archive、manifest 与布局不符、catalog 不降级、进程树残留）
+都在 `Scripts/run-tests.sh` 与 `Scripts/runtime-smoke.sh` 里，详见第 8 节。
+
 ## 5. 签名与密钥
 
 ```text
@@ -332,7 +350,15 @@ Scripts/verify-published-runtime.sh   发布后从公开 URL 回下载验证（�
 
 `Scripts/run-tests.sh` 覆盖：版本解析与构建输入校验、catalog 与 metadata 规则（含 `dataFormat`、
 `pluginMarket`、`sha256`、`size`、跨架构契约一致性）、catalog 不降级、签名与信封校验、依赖闭包
-审计、插件市场范围语义与解析规则、以及针对损坏 artifact 的负例。
+审计、插件市场范围语义与解析规则、进程树清理（真实进程，见
+`Scripts/tests/process-tree-scenarios.sh`）、以及针对损坏 artifact 的负例。
+
+测试分两层，PR 不会被拖慢：
+
+| 层 | 何时运行 | 内容 |
+| --- | --- | --- |
+| 快（约 20s，离线、无密钥） | 每个 PR 与 main push（`verify.yml`） | `Scripts/run-tests.sh` 全部 fixture 与进程清理场景 |
+| 重（需要网络与签名环境） | 发布流程、手动 dispatch、cron（`runtime-builder.yml`） | 真实构建两个架构 → 对解包后的 artifact 跑 smoke → 签名发布 → 从公开 URL 回下载验证 |
 
 smoke test 的检查项：
 
@@ -383,7 +409,14 @@ smoke test 不需要账号或 API key。唯一需要网络的是第 6 步（安�
   「catalog 记录实际 artifact 的 SHA-256 + 客户端逐字节校验」，而不是重建结果一致；
   `dependencyLockSHA256` 与 `provenance` 用于追溯每次发布。
 - **x64 Runtime 未经真实 Intel 机器验证**：构建与测试都在 Apple Silicon runner 上通过 Rosetta
-  完成，架构由 `lipo -archs` 断言。
+  完成，架构由 `lipo -archs` 断言。当前覆盖：
+
+  | 环境 | 状态 |
+  | --- | --- |
+  | Apple Silicon 原生执行 | 已支持，并在每次构建中执行 |
+  | x86_64 Mach-O 架构校验（`lipo`） | 已测试 |
+  | Apple Silicon 上通过 Rosetta 执行 x86_64 | 已测试 |
+  | 真实 Intel Mac 硬件 | 当前不可用（不加 workaround） |
 - **smoke test 依赖上游内部协议**：`web` 子命令或 `settings/describe` RPC 变化会导致构建失败
   （有意 fail closed），需要同步更新 `Scripts/runtime-smoke.sh`；历史上已发生过一次。
 - **历史 release 不清理**：客户端本地缓存可能仍引用它们。
@@ -404,6 +437,8 @@ smoke test 不需要账号或 API key。唯一需要网络的是第 6 步（安�
 | `Scripts/build-runtime.sh` | 构建单个架构的 artifact |
 | `Scripts/audit-dependencies.js` | 拒绝依赖闭包中未登记的 install / native 构建脚本 |
 | `Scripts/runtime-smoke.sh` | 对解包后的 artifact 运行本地 smoke test |
+| `Scripts/lib/process-tree.sh` | 进程树记录、断言与 best-effort 清理（smoke 与测试共用） |
+| `Scripts/tests/process-tree-scenarios.sh` | 用真实进程验证清理语义的场景 |
 | `Scripts/generate-runtime-catalog.sh` | 合并两个架构的 metadata 生成 catalog |
 | `Scripts/check-catalog-precedent.sh` | 拒绝 catalog 降级，报告同版本重新打包 |
 | `Scripts/sign-runtime-catalog.sh` | 用 Ed25519 私钥签名 catalog |
