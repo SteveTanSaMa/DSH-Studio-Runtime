@@ -93,12 +93,15 @@ SHA-256                 ← artifact 身份：重新打包改变的是这个值�
 用户可见的版本号只有 Harness 版本。构建过程信息（commit、run id）写在 Release 正文与 manifest
 的 `provenance` 中，不进入版本号，也不出现在用户界面的版本位置。
 
-### 历史形式
+### 历史形式（已退役）
 
-仓库曾使用 `<harnessVersion>-verN` 表示同一 Harness 版本的第 N 次打包；该后缀已退役。现有版本
-一律使用纯 Harness 版本号。客户端仍可解析历史形式并正确排序（同一 Harness 版本下 `-verN` 大于
-纯版本号，更新的 Harness 版本大于旧 Harness 的任何 `-verN`），因此历史 catalog 仍可读；本项目
-不再产生新的 `-verN` 版本。
+仓库曾使用 `<harnessVersion>-verN` 表示同一 Harness 版本的第 N 次打包。该形式已退役：
+
+- 发布侧不再接受它：`Scripts/build-runtime.sh` 与 `Scripts/generate-runtime-catalog.sh` 都会拒绝
+  携带构建计数的版本输入；
+- 已发布的 `-verN` release 与 catalog 均已清理，仓库中不存在该形式的产物；
+- `Scripts/check-catalog-precedent.sh` 不再为它保留解析分支：Runtime 版本即 Harness 版本，按
+  第 2 节的排序规则比较。
 
 ## 3. 产物与命名
 

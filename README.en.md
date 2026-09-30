@@ -99,13 +99,16 @@ and the client never disagree about which Runtime is newer.
 The only user-visible version is the Harness version. Build details (commit, run id) are written into
 the release body and the manifest's `provenance`; they never appear as part of a version string.
 
-### Historical form
+### Historical form (retired)
 
 The repository previously used `<harnessVersion>-verN` for the Nth packaging of the same Harness
-version; that suffix is retired. Published versions now use the plain Harness version. Clients can
-still parse and order the historical form (`-verN` outranks the plain form of the same Harness
-version, and a newer Harness version outranks any `-verN` of an older one), so historical catalogs
-remain readable; this repository no longer produces `-verN` versions.
+version. That form is retired:
+
+- the publishing side no longer accepts it: both `Scripts/build-runtime.sh` and
+  `Scripts/generate-runtime-catalog.sh` reject a version that carries a build counter;
+- every `-verN` release and catalog has been removed, so no artifact of that form exists;
+- `Scripts/check-catalog-precedent.sh` keeps no parsing branch for it: a Runtime version is a Harness
+  version and is compared by the ordering rules in section 2.
 
 ## 3. Artifacts and naming
 

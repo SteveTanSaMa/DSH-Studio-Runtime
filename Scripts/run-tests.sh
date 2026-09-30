@@ -415,37 +415,6 @@ make_catalog "$WORK_DIR/release" "0.1.1"
 make_catalog "$WORK_DIR/older-harness" "1.2.3"
 make_catalog "$WORK_DIR/newer-harness" "1.2.4"
 
-# A catalog published before the build counter was retired, written by hand
-# because the tooling no longer produces that identity.
-cat > "$WORK_DIR/legacy-catalog.json" <<'JSON'
-{
-  "schemaVersion": 1,
-  "runtimeVersion": "0.1.1-rc.2-ver1",
-  "releases": [
-    {
-      "runtimeVersion": "0.1.1-rc.2-ver1",
-      "architecture": "darwin-arm64",
-      "artifact": {
-        "runtimeVersion": "0.1.1-rc.2-ver1",
-        "architecture": "darwin-arm64",
-        "url": "https://github.com/SteveTanSaMa/DSH-Studio-Runtime/releases/download/runtime-0.1.1-rc.2-ver1/dsh-runtime-0.1.1-rc.2-ver1-darwin-arm64.tar.gz",
-        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
-      }
-    },
-    {
-      "runtimeVersion": "0.1.1-rc.2-ver1",
-      "architecture": "darwin-x64",
-      "artifact": {
-        "runtimeVersion": "0.1.1-rc.2-ver1",
-        "architecture": "darwin-x64",
-        "url": "https://github.com/SteveTanSaMa/DSH-Studio-Runtime/releases/download/runtime-0.1.1-rc.2-ver1/dsh-runtime-0.1.1-rc.2-ver1-darwin-x64.tar.gz",
-        "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
-      }
-    }
-  ]
-}
-JSON
-
 expect_success "the catalog names the Harness version" \
     node -e '
 const assert = require("assert");
@@ -482,11 +451,6 @@ expect_failure "refuses a prerelease after the release of the same version" \
 expect_success "allows a downgrade only when explicitly requested" \
     env ALLOW_CATALOG_DOWNGRADE=1 \
     "$SCRIPT_DIR/check-catalog-precedent.sh" "$WORK_DIR/v1/catalog.json" "$WORK_DIR/rc1/catalog.json"
-expect_failure "the transition from a legacy -verN catalog needs an explicit downgrade allowance" \
-    "$SCRIPT_DIR/check-catalog-precedent.sh" "$WORK_DIR/legacy-catalog.json" "$WORK_DIR/v1/catalog.json"
-expect_success "a legacy -verN catalog can be replaced once the transition is acknowledged" \
-    env ALLOW_CATALOG_DOWNGRADE=1 \
-    "$SCRIPT_DIR/check-catalog-precedent.sh" "$WORK_DIR/legacy-catalog.json" "$WORK_DIR/v1/catalog.json"
 
 expect_success_matching "a repack reports the replacement instead of failing" \
     "replacing the published darwin-arm64 artifact" \

@@ -38,21 +38,12 @@ const fs = require("fs");
 
 const HARNESS_VERSION_PATTERN = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/;
 
-// DSH Studio orders Runtime versions by the Harness version first and, only for
-// the same Harness version, by the revision the retired -verN suffix carried.
-// Bare versions are the current form, and they are ordered by their prerelease
-// rules (0.1.1-rc.10 < 0.1.1).
+// A Runtime version is a Harness version. The retired <harness>-verN form is
+// deliberately not accommodated here: no published release or catalog uses it,
+// the build rejects it as input, and a catalog that carried it cannot exist.
 function parseRuntimeVersion(value) {
   const text = value || "";
-  // The retired marker is read first, because it is the more specific form:
-  // "0.1.5-rc.2-ver1" is the 0.1.5-rc.2 line with revision 1, not a Harness
-  // version named that way.
-  const legacy = /^(.*)-ver([1-9][0-9]*)$/.exec(text);
-  if (legacy && HARNESS_VERSION_PATTERN.test(legacy[1])) {
-    return { harness: legacy[1], revision: Number(legacy[2]) };
-  }
-  if (HARNESS_VERSION_PATTERN.test(text)) return { harness: text, revision: 0 };
-  return null;
+  return HARNESS_VERSION_PATTERN.test(text) ? text : null;
 }
 
 function parseHarnessVersion(value) {
@@ -118,18 +109,15 @@ function compareHarnessVersions(left, right) {
 }
 
 // Mirrors DSH Studio's RuntimeVersionOrdering so the pipeline never disagrees
-// with the client about which Runtime is newer.
+// with the client about which Runtime is newer: versions are compared by parsing
+// them, never as strings, and a recognizable Runtime version outranks a string
+// that is not one.
 function compareRuntimeVersions(left, right) {
   const leftVersion = parseRuntimeVersion(left);
   const rightVersion = parseRuntimeVersion(right);
-  if (leftVersion && rightVersion) {
-    const harnessComparison = compareHarnessVersions(leftVersion.harness, rightVersion.harness);
-    if (harnessComparison !== 0) return harnessComparison;
-    if (leftVersion.revision === rightVersion.revision) return 0;
-    return leftVersion.revision < rightVersion.revision ? -1 : 1;
-  }
-  if (leftVersion && !rightVersion) return 1;
-  if (!leftVersion && rightVersion) return -1;
+  if (leftVersion && rightVersion) return compareHarnessVersions(leftVersion, rightVersion);
+  if (leftVersion) return 1;
+  if (rightVersion) return -1;
   return compareComponents(left, right);
 }
 
