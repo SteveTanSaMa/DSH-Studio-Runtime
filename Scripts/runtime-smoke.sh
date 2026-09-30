@@ -116,6 +116,12 @@ require_module node-pty
 if [ -d "$HARNESS_ROOT/node_modules/fs-ext" ]; then
     require_module fs-ext
 fi
+# koffi is a native FFI library whose binding arrives through a platform-specific
+# optional dependency; a wrong architecture or a missing optional package only
+# fails when it is loaded, so load it here as well.
+if [ -d "$HARNESS_ROOT/node_modules/koffi" ]; then
+    require_module koffi
+fi
 
 # node-pty alone is not enough: the terminal feature depends on spawn-helper
 # actually starting a process.
@@ -143,6 +149,86 @@ MARKET_LOG="$TEMP_ROOT/plugin-market.log"
 # mask a broken default and the Harness cannot touch real user data.
 SMOKE_HOME="$TEMP_ROOT/home"
 DSH_HOME="$TEMP_ROOT/dsh-home"
+
+# Returns 0 when the Harness exits on SIGTERM, non-zero when it had to be
+# escalated to SIGKILL.
+stop_harness() {
+    [ -n "${HARNESS_PID:-}" ] || return 0
+    kill -0 "$HARNESS_PID" 2>/dev/null || return 0
+    kill -TERM "$HARNESS_PID" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+        kill -0 "$HARNESS_PID" 2>/dev/null || return 0
+        sleep 0.5
+    done
+    return 1
+}
+
+force_stop_harness() {
+    [ -n "${HARNESS_PID:-}" ] || return 0
+    kill -0 "$HARNESS_PID" 2>/dev/null || return 0
+    kill -KILL "$HARNESS_PID" 2>/dev/null || true
+    return 0
+}
+
+cleanup() {
+    if ! stop_harness; then
+        force_stop_harness
+    fi
+    if [ -n "${HARNESS_PID:-}" ]; then
+        wait "$HARNESS_PID" 2>/dev/null || true
+    fi
+    rm -rf "$TEMP_ROOT"
+}
+
+# Registered as soon as the temporary root exists, before anything below can
+# fail, so no phase can leave the directory or a Harness process behind.
+trap cleanup EXIT
+
+# Prints every descendant of a PID, children first.
+descendants_of() {
+    local parent="$1" child
+    for child in $(pgrep -P "$parent" 2>/dev/null || true); do
+        descendants_of "$child"
+        printf '%s\n' "$child"
+    done
+}
+
+# Collects the descendants seen so far. The Harness may fork a host process of
+# its own while it runs, so the set is sampled repeatedly and treated as a union:
+# a process that appeared at any point must be gone once the Harness exits, and
+# one that already exited on its own is harmless.
+record_descendants() {
+    HARNESS_DESCENDANTS="$HARNESS_DESCENDANTS $(descendants_of "$HARNESS_PID" | tr '\n' ' ')"
+}
+
+# Verifies that the processes the Harness had started are gone after it exits.
+# The PIDs were recorded while the Harness was still running: once it exits, its
+# children are reparented and are no longer reachable from it.
+assert_no_lingering_descendants() {
+    local pid remnants recorded=0
+    HARNESS_DESCENDANTS="$(printf '%s\n' $HARNESS_DESCENDANTS | sort -u | tr '\n' ' ')"
+    for _ in $HARNESS_DESCENDANTS; do
+        recorded=$((recorded + 1))
+    done
+    for _ in $(seq 1 10); do
+        remnants=""
+        for pid in $HARNESS_DESCENDANTS; do
+            kill -0 "$pid" 2>/dev/null && remnants="$remnants $pid"
+        done
+        if [ -z "$remnants" ]; then
+            printf 'runtime-smoke: %s recorded descendant process(es), none left behind\n' \
+                "$recorded"
+            return 0
+        fi
+        sleep 0.5
+    done
+    printf 'runtime-smoke: Harness left descendant processes behind:%s\n' "$remnants" >&2
+    for pid in $remnants; do
+        ps -o pid=,ppid=,command= -p "$pid" 2>/dev/null | cut -c1-160 >&2 || true
+    done
+    return 1
+}
+
 mkdir -p "$SMOKE_HOME" "$DSH_HOME"
 
 # Installs the plugin market pin this Runtime publishes, exactly the way DSH
@@ -174,6 +260,9 @@ process.stdout.write(pin ? [pin.package || "", pin.version || "", pin.integrity 
     registry="${registry%/}/"
 
     printf 'runtime-smoke: installing %s@%s into a scratch profile\n' "$market_package" "$market_version"
+    # Install scripts stay disabled, exactly as DSH Studio does it: the pinned
+    # market is a prebuilt tarball and must never run install hooks. The smoke
+    # therefore exercises the same policy the user gets, not a stricter one.
     if ! (
         cd "$TEMP_ROOT"
         PATH="$(dirname "$NODE_EXECUTABLE"):$(dirname "$PNPM_EXECUTABLE"):$PATH" \
@@ -230,37 +319,6 @@ NODE
     return $?
 }
 
-# Returns 0 when the Harness exits on SIGTERM, non-zero when it had to be
-# escalated to SIGKILL.
-stop_harness() {
-    [ -n "${HARNESS_PID:-}" ] || return 0
-    kill -0 "$HARNESS_PID" 2>/dev/null || return 0
-    kill -TERM "$HARNESS_PID" 2>/dev/null || true
-    for _ in $(seq 1 20); do
-        kill -0 "$HARNESS_PID" 2>/dev/null || return 0
-        sleep 0.5
-    done
-    return 1
-}
-
-force_stop_harness() {
-    [ -n "${HARNESS_PID:-}" ] || return 0
-    kill -0 "$HARNESS_PID" 2>/dev/null || return 0
-    kill -KILL "$HARNESS_PID" 2>/dev/null || true
-    return 0
-}
-
-cleanup() {
-    if ! stop_harness; then
-        force_stop_harness
-    fi
-    if [ -n "${HARNESS_PID:-}" ]; then
-        wait "$HARNESS_PID" 2>/dev/null || true
-    fi
-    rm -rf "$TEMP_ROOT"
-}
-trap cleanup EXIT
-
 # The market is installed first so the boot below exercises the profile DSH
 # Studio will actually run: a pinned market that breaks the Harness would fail
 # here instead of on a user's machine.
@@ -270,6 +328,7 @@ run_plugin_market_phase || exit 1
 # shebangs; it runs directly in the background so signals reach it and not an
 # intermediate shell.
 cd "$TEMP_ROOT"
+: > "$LOG_FILE"
 PATH="$(dirname "$NODE_EXECUTABLE"):$(dirname "$PNPM_EXECUTABLE"):$PATH" \
 HOME="$SMOKE_HOME" \
 XDG_CONFIG_HOME="$SMOKE_HOME/.config" \
@@ -283,7 +342,9 @@ HARNESS_PID=$!
 
 READY_URL=""
 HEALTHY=0
+HARNESS_DESCENDANTS=""
 for _ in $(seq 1 120); do
+    record_descendants
     READY_URL="$(sed -n 's/.*\(http:\/\/127\.0\.0\.1:[0-9][0-9]*\/?token=[^[:space:]]*\).*/\1/p' "$LOG_FILE" | tail -n 1 || true)"
     if [ -n "$READY_URL" ]; then
         READY_BASE_URL="$(printf '%s' "$READY_URL" | sed 's#/?token=.*##')"
@@ -319,6 +380,16 @@ if [ "$HEALTHY" -ne 1 ]; then
     exit 1
 fi
 
+# DSH Studio stops the Runtime with SIGTERM when the app quits and expects the
+# whole tree to be gone: a helper or node subprocess that outlives the Harness
+# keeps running after the user quits and keeps the Runtime directory busy during
+# the next update. The Harness forks its host process right after the port opens,
+# so keep sampling for a moment before the shutdown check.
+for _ in $(seq 1 6); do
+    sleep 0.5
+    record_descendants
+done
+
 kill -0 "$HARNESS_PID" 2>/dev/null || {
     printf 'runtime-smoke: Harness exited immediately after a successful probe\n' >&2
     exit 1
@@ -333,6 +404,10 @@ if ! stop_harness; then
 fi
 wait "$HARNESS_PID" 2>/dev/null || true
 HARNESS_PID=""
+
+if ! assert_no_lingering_descendants; then
+    exit 1
+fi
 
 printf 'Runtime smoke passed: %s / Harness %s / Node %s / pnpm %s / %s\n' \
     "$RUNTIME_VERSION" "$HARNESS_VERSION" "$NODE_VERSION" "$PNPM_VERSION" "$ARCHITECTURE"

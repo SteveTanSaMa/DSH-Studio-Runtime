@@ -180,6 +180,8 @@ resolve exact Harness version
         ▼
 build（每条架构各跑一次）
         ▼
+audit dependencies（依赖闭包新增未登记的 install / native 构建脚本 → 失败）
+        ▼
 generate manifest（platform / dependencyLockSHA256 / provenance / pluginMarket / dataFormat）
         ▼
 package + SHA-256
@@ -207,6 +209,7 @@ verify-published（从公开 URL 重新下载，验签并校验 SHA-256）
 | `PNPM_VERSION` 未提供 | 构建失败 |
 | Node 归档与其官方 `SHASUMS256.txt` 不符 | 构建失败 |
 | 没有任何插件市场版本声明支持该 Harness | 构建失败（除非显式 `none`，见第 7 节） |
+| 依赖闭包出现未登记的 install / native 构建脚本 | 构建失败 |
 | smoke test 任一断言失败 | 构建失败 |
 | artifact 字节与其 metadata 的 `sha256`/`size` 不符 | catalog 生成失败 |
 | 已发布的 catalog 验签失败 | 发布失败 |
@@ -328,8 +331,8 @@ Scripts/verify-published-runtime.sh   发布后从公开 URL 回下载验证（�
 ```
 
 `Scripts/run-tests.sh` 覆盖：版本解析与构建输入校验、catalog 与 metadata 规则（含 `dataFormat`、
-`pluginMarket`、`sha256`、`size`、跨架构契约一致性）、catalog 不降级、签名与信封校验、插件市场
-范围语义与解析规则、以及针对损坏 artifact 的负例。
+`pluginMarket`、`sha256`、`size`、跨架构契约一致性）、catalog 不降级、签名与信封校验、依赖闭包
+审计、插件市场范围语义与解析规则、以及针对损坏 artifact 的负例。
 
 smoke test 的检查项：
 
@@ -337,17 +340,21 @@ smoke test 的检查项：
 2. 打包的 Node 与 pnpm 可执行，版本与 manifest 相符；
 3. `node`、`node-pty/pty.node`、`spawn-helper` 的 Mach-O 架构与 manifest 一致（x64 在 Apple
    Silicon runner 上通过 Rosetta 构建，仅验证「能运行」会漏掉错架构）；
-4. `node-pty` 与（若存在）`fs-ext` 能被打包的 Node 真正加载；
+4. `node-pty` 与（若存在）`fs-ext`、`koffi` 能被打包的 Node 真正加载（后两者的原生二进制来自
+   平台相关的 optional dependency，装错架构只有加载时才暴露）；
 5. 能用 pty 实际启动进程并取得输出（真正使用 `spawn-helper`）；
 6. 若 manifest 带有插件市场 pin，用与 App 相同的方式在 scratch profile 中安装并核对
    `package.json`、`node_modules` 版本与 `pnpm-lock.yaml` 中的版本和 integrity；
 7. Harness 能启动 `web --host 127.0.0.1 --port 0 --no-open`，完成 token 换取并回答
    `settings/describe`；该步骤同时验证「带固定市场版本的 profile 能正常启动」；
-8. 探测后进程仍存活，并在收到 SIGTERM 后正常退出。
+8. 探测后进程仍存活，并在收到 SIGTERM 后正常退出；
+9. 启动期间在 Harness 下观察到过的子进程（Harness 可能 fork 自身的 host 进程）全部退出，
+   不留 orphan。
 
 smoke test 不需要账号或 API key。唯一需要网络的是第 6 步（安装插件市场），可用
 `DSH_RUNTIME_SMOKE_SKIP_PLUGIN_MARKET=1` 跳过。运行环境隔离：`HOME`、`XDG_*`、`DSH_HOME` 均
-指向临时目录，不读写真实用户数据。
+指向临时目录，不读写真实用户数据。该步骤的 install 脚本策略与 App 一致（禁用），见
+`docs/runtime-contract.md` 第 3 节。
 
 **不覆盖**：不创建 session、不调用模型、不验证插件市场自身的 HTTP 路由与界面交互。
 
@@ -395,6 +402,7 @@ smoke test 不需要账号或 API key。唯一需要网络的是第 6 步（安�
 | `.github/workflows/runtime-builder.yml` | 构建、验证、签名与发布 Runtime |
 | `.github/workflows/verify.yml` | PR 门禁：离线测试套件（无 secret） |
 | `Scripts/build-runtime.sh` | 构建单个架构的 artifact |
+| `Scripts/audit-dependencies.js` | 拒绝依赖闭包中未登记的 install / native 构建脚本 |
 | `Scripts/runtime-smoke.sh` | 对解包后的 artifact 运行本地 smoke test |
 | `Scripts/generate-runtime-catalog.sh` | 合并两个架构的 metadata 生成 catalog |
 | `Scripts/check-catalog-precedent.sh` | 拒绝 catalog 降级，报告同版本重新打包 |

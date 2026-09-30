@@ -190,6 +190,8 @@ resolve exact Harness version
         ▼
 build (once per architecture)
         ▼
+audit dependencies (a new install / native build script in the closure → fail)
+        ▼
 generate manifest (platform / dependencyLockSHA256 / provenance / pluginMarket / dataFormat)
         ▼
 package + SHA-256
@@ -217,6 +219,7 @@ A failure at any step produces no new usable catalog.
 | `PNPM_VERSION` is missing | build fails |
 | The Node archive does not match its official `SHASUMS256.txt` | build fails |
 | No plugin market version declares support for the Harness version | build fails (unless `none` is explicit, see section 7) |
+| The dependency closure gains an unrecorded install / native build script | build fails |
 | Any smoke test assertion fails | build fails |
 | Artifact bytes do not match their metadata's `sha256`/`size` | catalog generation fails |
 | The already published catalog does not verify | release fails |
@@ -348,8 +351,8 @@ Scripts/verify-published-runtime.sh   post-publish re-download verification (rea
 
 `Scripts/run-tests.sh` covers version parsing and build-input validation, catalog and metadata rules
 (including `dataFormat`, `pluginMarket`, `sha256`, `size`, and cross-architecture contract equality),
-catalog downgrade refusal, signing and envelope verification, plugin-market range semantics and
-resolution, and negative cases against broken artifacts.
+catalog downgrade refusal, signing and envelope verification, the dependency audit, plugin-market
+range semantics and resolution, and negative cases against broken artifacts.
 
 Smoke test checks:
 
@@ -358,18 +361,24 @@ Smoke test checks:
 3. `node`, `node-pty/pty.node` and `spawn-helper` carry the Mach-O architecture the manifest claims
    (x64 is built on an Apple Silicon runner through Rosetta, where "it runs" would not catch a wrong
    architecture);
-4. `node-pty` and, when present, `fs-ext` actually load in the packaged Node;
+4. `node-pty` and, when present, `fs-ext` and `koffi` actually load in the packaged Node (the latter
+   two ship their native binaries inside platform-specific optional dependencies, so a wrong
+   architecture only shows up when they are loaded);
 5. a pty can really spawn a process and return its output (exercising `spawn-helper`);
 6. when the manifest carries a plugin market pin, it is installed into a scratch profile exactly as the
    app does it, and the profile's `package.json`, `node_modules` version, and `pnpm-lock.yaml` version
    and integrity are checked;
 7. Harness starts with `web --host 127.0.0.1 --port 0 --no-open`, exchanges the token, and answers
    `settings/describe` — which also proves a profile carrying the pinned market boots;
-8. the process is still alive after the probe and exits cleanly on SIGTERM.
+8. the process is still alive after the probe and exits cleanly on SIGTERM;
+9. every process observed under Harness while it was running is gone afterwards (Harness may fork its
+   own host process), so no orphan outlives the shutdown.
 
 The smoke test needs no account and no API key. Only step 6 requires the network (the market install)
 and can be skipped with `DSH_RUNTIME_SMOKE_SKIP_PLUGIN_MARKET=1`. The environment is isolated: `HOME`,
 `XDG_*`, and `DSH_HOME` all point into a temporary directory, so no real user data is read or written.
+That step installs with scripts disabled, matching the app's policy; see section 3 of
+`docs/runtime-contract.md`.
 
 **Not covered**: the smoke test creates no session, calls no model, and does not exercise the plugin
 market's own HTTP routes or UI.
@@ -426,6 +435,7 @@ The `docs/` files are currently Chinese only.
 | `.github/workflows/runtime-builder.yml` | Build, verify, sign, and publish the Runtime |
 | `.github/workflows/verify.yml` | Pull request gate: the offline test suite (no secrets) |
 | `Scripts/build-runtime.sh` | Build one architecture's artifact |
+| `Scripts/audit-dependencies.js` | Refuse unrecorded install / native build scripts in the closure |
 | `Scripts/runtime-smoke.sh` | Run the local smoke test on an extracted artifact |
 | `Scripts/generate-runtime-catalog.sh` | Merge both architectures' metadata into the catalog |
 | `Scripts/check-catalog-precedent.sh` | Refuse catalog downgrades, report same-version repacks |

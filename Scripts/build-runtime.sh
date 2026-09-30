@@ -194,6 +194,13 @@ printf 'Resolving Harness %s and pnpm %s\n' "$HARNESS_VERSION" "$PNPM_VERSION"
         --registry "$REGISTRY"
 )
 
+# The dependency graph is installed with --ignore-scripts on purpose. A future
+# Harness release must not silently add a package whose install or native build
+# script is then skipped, so the resolved graph is audited here: an unexpected
+# entry fails the build instead of a user's feature later.
+"$NODE_EXECUTABLE" "$SCRIPT_DIR/audit-dependencies.js" "$HARNESS_ROOT/package-lock.json" || die \
+    "dependency audit failed"
+
 # @deepseek-ai/dsh-session-persistence-jsonl (added in Harness 0.1.3-alpha.2)
 # depends on fs-ext, a native module that ships no prebuilt binding and is
 # built by its install script. Keep --ignore-scripts for the rest of the tree,

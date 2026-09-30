@@ -434,6 +434,8 @@ expect_success "accepts a newer Harness version" \
     "$SCRIPT_DIR/check-catalog-precedent.sh" "$WORK_DIR/rc1/catalog.json" "$WORK_DIR/v1/catalog.json"
 expect_success "accepts a repack of the same Runtime version" \
     "$SCRIPT_DIR/check-catalog-precedent.sh" "$WORK_DIR/v1/catalog.json" "$WORK_DIR/repack/catalog.json"
+expect_success "accepts a republication of byte-identical assets" \
+    "$SCRIPT_DIR/check-catalog-precedent.sh" "$WORK_DIR/v1/catalog.json" "$WORK_DIR/v1/catalog.json"
 expect_success "accepts a repack of the same Harness version across minor lines" \
     "$SCRIPT_DIR/check-catalog-precedent.sh" "$WORK_DIR/older-harness/catalog.json" "$WORK_DIR/newer-harness/catalog.json"
 expect_success "orders rc.10 above rc.9" \
@@ -469,6 +471,62 @@ for (const index of [0, 1]) {
   assert.notStrictEqual(first.releases[index].artifact.sha256, second.releases[index].artifact.sha256);
 }
 ' "$WORK_DIR/v1/catalog.json" "$WORK_DIR/repack/catalog.json"
+
+echo "dependency audit"
+mkdir -p "$WORK_DIR/audit"
+cat > "$WORK_DIR/audit/allowlisted.json" <<'JSON'
+{
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "dependencies": { "node-pty": "1.2.0-beta.15" } },
+    "node_modules/node-pty": { "version": "1.2.0-beta.15", "hasInstallScript": true },
+    "node_modules/protobufjs": { "version": "7.6.6", "hasInstallScript": true },
+    "node_modules/@deepseek-ai/dsh-subprocess-local": { "version": "0.2.0-rc.2", "hasInstallScript": true }
+  }
+}
+JSON
+expect_success "accepts a graph whose install scripts are all accounted for" \
+    node "$SCRIPT_DIR/audit-dependencies.js" "$WORK_DIR/audit/allowlisted.json"
+
+cat > "$WORK_DIR/audit/unexpected-script.json" <<'JSON'
+{
+  "lockfileVersion": 3,
+  "packages": {
+    "": {},
+    "node_modules/node-pty": { "version": "1.2.0-beta.15", "hasInstallScript": true },
+    "node_modules/some-new-native": { "version": "1.0.0", "hasInstallScript": true }
+  }
+}
+JSON
+expect_failure_matching "fails when a new package adds an install script the Runtime skips" \
+    "declare an install script the Runtime does not run: some-new-native@1.0.0 (install script)" \
+    node "$SCRIPT_DIR/audit-dependencies.js" "$WORK_DIR/audit/unexpected-script.json"
+
+cat > "$WORK_DIR/audit/unexpected-gyp.json" <<'JSON'
+{
+  "lockfileVersion": 3,
+  "packages": {
+    "": {},
+    "node_modules/some-native-addon": { "version": "2.0.0", "gypfile": true }
+  }
+}
+JSON
+expect_failure_matching "fails when a new package needs a native build the Runtime skips" \
+    "some-native-addon@2.0.0 (native build)" \
+    node "$SCRIPT_DIR/audit-dependencies.js" "$WORK_DIR/audit/unexpected-gyp.json"
+
+cat > "$WORK_DIR/audit/no-scripts.json" <<'JSON'
+{
+  "lockfileVersion": 3,
+  "packages": {
+    "": {},
+    "node_modules/left-pad": { "version": "1.3.0" }
+  }
+}
+JSON
+expect_success_matching "notes every allowlist entry that left the dependency graph" \
+    "protobufjs is allowlisted but no longer in the dependency graph" \
+    node "$SCRIPT_DIR/audit-dependencies.js" "$WORK_DIR/audit/no-scripts.json"
 
 echo "plugin market pin"
 expect_success "range semantics match DSH Studio's PluginCompatibility" \

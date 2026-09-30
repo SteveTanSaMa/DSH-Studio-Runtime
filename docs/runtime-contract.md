@@ -143,6 +143,12 @@ Runtime 的人手里，因为只有它同时知道 Harness 版本和市场的兼
 决定存在并带进 catalog）、`runtime-smoke.sh`（在 scratch profile 里按 pin 实装一次并让
 Harness 带着它启动）。
 
+安装市场时**禁用 install / lifecycle script**（`npm_config_ignore_scripts=true`）：市场是
+已构建好的 tarball，安装它不该执行任何包内脚本。这是客户端策略而不是 smoke 测试的临时
+限制，`runtime-smoke.sh` 用同样的策略安装，所以它验证的就是用户真实得到的行为。Runtime
+自身的依赖闭包同样整体禁用脚本，需要构建的包（`fs-ext`）由 `build-runtime.sh` 显式处理，
+并且由 `Scripts/audit-dependencies.js` 保证不会有新的包悄悄漏进来。
+
 ## 4. Artifact 布局与 manifest（`schemaVersion: 3`）
 
 archive（gzip 的 tar）根目录只允许：
@@ -203,6 +209,14 @@ manifest 字段与 catalog release 一致。三个层级因此落在：
 - 数据格式：`dataFormat.id` 相同或在 `compatibleWith` 中 → 复用数据；不兼容 → 新建隔离
   profile，**不迁移、不覆盖、不删除**旧数据；未声明 `dataFormat` → 阻塞更新。
   `migration` 目前只是标记，客户端不会自动执行迁移。
+- 进程生命周期：Harness 运行期间可能 fork 出自身（观察到的形态是命令行完全相同的另一个
+  `dsh web` 进程，取决于启动环境）。因此「只对启动时拿到的那个 PID 发 SIGTERM」不保证整棵树
+  退出——被 SIGTERM 的父进程退出后，子进程会被 reparent 到 launchd 并继续存活。客户端停止
+  Runtime 时必须按进程组停止（或按启动时记录的 descendants 清理）。`runtime-smoke.sh` 会在
+  SIGTERM 之后断言「启动期间观察到的 descendants 全部退出」，任何残留都会失败。
+- 已安装构建的身份：`runtimeVersion` 不是 artifact 身份（同版本 repack 会发布不同字节，见
+  第 0 节）。客户端判断「已装了哪个构建」至少需要 `(runtimeVersion, architecture, artifact
+  sha256)` 三者；只用版本号会把两个不同构建当成同一个。
 
 ## 7. 变更规则
 
