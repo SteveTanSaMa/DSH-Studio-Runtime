@@ -233,6 +233,9 @@ verify-published（从公开 URL 重新下载，验签并校验 SHA-256）
 - 附件是逐个上传的，因此存在「新 tar 包已上传、catalog 尚未更新」的窗口。该窗口内客户端若用
   缓存中的 catalog 校验新字节会失败并拒绝安装（fail closed），不会安装损坏的 Runtime。
 
+- 若运行在创建 `runtime-catalog` release 之后、上传 catalog 之前被打断，release 会存在但没有
+  catalog 资产。这种状态不会阻塞后续发布：下一次发布按「尚无已发布 catalog」处理并写入签名
+  catalog 修复它。验签没有被削弱——资产存在但验签失败时仍然拒绝发布。
 - 每次发布结束后，流水线把 `runtime-catalog` 重新标记为 GitHub 的 Latest：否则徽章会随新版本
   转移，把客户端入口挤到列表下方。该操作只影响徽章，不修改任何资产。
 

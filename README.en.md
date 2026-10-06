@@ -246,6 +246,10 @@ A failure at any step produces no new usable catalog.
   the catalog still records the old one. A client verifying the new bytes against a cached catalog
   fails closed and does not install anything during that window.
 
+- If a run is interrupted after creating the `runtime-catalog` release but before uploading the
+  catalog, the release exists without its asset. That state does not block later runs: the next
+  publish treats it as "no published catalog asset yet" and writes a signed catalog, repairing it.
+  Verification is not weakened — an asset that exists but does not verify is still refused.
 - After each release the pipeline marks `runtime-catalog` as GitHub's **Latest** again; otherwise the
   badge moves to the new version and pushes the client's entry point down the list. The operation only
   affects the badge and never touches assets.

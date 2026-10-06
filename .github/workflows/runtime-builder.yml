@@ -381,7 +381,17 @@ jobs:
             RuntimeArtifacts/artifact-*.json
 
           # ... and it must never move backwards or replace published bytes.
-          if gh release view runtime-catalog --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          # A catalog release that exists without its asset (an interrupted
+          # publish) carries nothing to compare against, so it is treated like
+          # the first publish and repaired by this run instead of blocking it.
+          published_catalog=""
+          if gh release view runtime-catalog --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && \
+             gh release view runtime-catalog --repo "$GITHUB_REPOSITORY" \
+               --json assets -q '.assets[].name' | grep -qx "runtime-catalog.signed.json"; then
+            published_catalog=1
+          fi
+
+          if [ -n "$published_catalog" ]; then
             mkdir -p RuntimeArtifacts/previous
             gh release download runtime-catalog \
               --repo "$GITHUB_REPOSITORY" \
@@ -401,7 +411,7 @@ jobs:
               RuntimeArtifacts/previous/payload.json \
               RuntimeArtifacts/runtime-release.json
           else
-            echo "No published catalog yet; skipping the precedent check."
+            echo "No published catalog asset yet; skipping the precedent check."
           fi
 
           ./Scripts/sign-runtime-catalog.sh \
