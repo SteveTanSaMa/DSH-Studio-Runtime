@@ -516,11 +516,12 @@ jobs:
           # back.
           rm -f "$RUNNER_TEMP/runtime-release-created"
 
-          # GitHub moves the "Latest" badge to whatever release was published
-          # most recently, which would push the catalog down the Releases page
-          # every time a Runtime ships. Hand it back to the catalog: it is the
-          # entry point clients read, and its assets are untouched here.
-          gh release edit runtime-catalog --repo "$GITHUB_REPOSITORY" --latest
+          # The "Latest" badge is deliberately left alone. GitHub gives it to the
+          # most recently published release, which is the Runtime a visiting human
+          # wants; clients never read it, they read the signed catalog at its fixed
+          # URL. The catalog stays at the bottom of the list because the list is
+          # ordered by publication time and the catalog release is created once,
+          # long before the runtimes published above it.
 
       - name: Remove a partially published release
         if: failure()

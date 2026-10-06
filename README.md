@@ -236,8 +236,11 @@ verify-published（从公开 URL 重新下载，验签并校验 SHA-256）
 - 若运行在创建 `runtime-catalog` release 之后、上传 catalog 之前被打断，release 会存在但没有
   catalog 资产。这种状态不会阻塞后续发布：下一次发布按「尚无已发布 catalog」处理并写入签名
   catalog 修复它。验签没有被削弱——资产存在但验签失败时仍然拒绝发布。
-- 每次发布结束后，流水线把 `runtime-catalog` 重新标记为 GitHub 的 Latest：否则徽章会随新版本
-  转移，把客户端入口挤到列表下方。该操作只影响徽章，不修改任何资产。
+- Releases 列表的顺序由**发布时间**决定，与 Latest 徽章无关。`runtime-catalog` 只在第一次创建
+  （早于所有 runtime），之后每次发布只替换它的资产，发布时间不变，因此它永远排在列表最下面；
+  新发布的 runtime 永远在最上面。流水线**不再**手动改 Latest 徽章：徽章由 GitHub 自动给最新的
+  release（也就是人打开仓库想看的那个 runtime）。客户端不读徽章，也不读 `releases/latest`，
+  它只读固定 URL 上的签名 catalog，所以徽章指向哪里都不影响更新。
 
 ### 更新安全（客户端语义）
 

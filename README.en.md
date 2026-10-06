@@ -250,9 +250,13 @@ A failure at any step produces no new usable catalog.
   catalog, the release exists without its asset. That state does not block later runs: the next
   publish treats it as "no published catalog asset yet" and writes a signed catalog, repairing it.
   Verification is not weakened — an asset that exists but does not verify is still refused.
-- After each release the pipeline marks `runtime-catalog` as GitHub's **Latest** again; otherwise the
-  badge moves to the new version and pushes the client's entry point down the list. The operation only
-  affects the badge and never touches assets.
+- The Releases list is ordered by **publication time**, not by the Latest badge. `runtime-catalog` is
+  created once, before any Runtime, and every publish only replaces its assets, so its publication
+  time never changes and it always sits at the bottom of the list; a newly published Runtime always
+  sits at the top. The pipeline no longer touches the badge: GitHub gives it to the most recently
+  published release, which is the Runtime a human visiting the repository wants. Clients read neither
+  the badge nor `releases/latest` — they read the signed catalog at its fixed URL, so wherever the
+  badge points has no effect on updates.
 
 ### Update safety (client semantics)
 
