@@ -374,21 +374,26 @@ smoke test 的检查项：
    Silicon runner 上通过 Rosetta 构建，仅验证「能运行」会漏掉错架构）；
 4. `node-pty` 与（若存在）`fs-ext`、`koffi` 能被打包的 Node 真正加载（后两者的原生二进制来自
    平台相关的 optional dependency，装错架构只有加载时才暴露）；
-5. 能用 pty 实际启动进程并取得输出（真正使用 `spawn-helper`）；
-6. 若 manifest 带有插件市场 pin，用与 App 相同的方式在 scratch profile 中安装并核对
+5. 安全相关的封装随 artifact 存在且能被打包的 Node 加载：`@deepseek-ai/dsh-sandbox-local`、
+   `-sandbox-policy`（三个模式名未被改名）、`dsh-credentials-local`；同时断言 `koffi` 的已安装
+   版本与上游写的精确 pin 一致（Harness 唯一的原生运行时依赖，不能静默换版本）；
+6. 能用 pty 实际启动进程并取得输出（真正使用 `spawn-helper`）；
+7. 若 manifest 带有插件市场 pin，用与 App 相同的方式在 scratch profile 中安装并核对
    `package.json`、`node_modules` 版本与 `pnpm-lock.yaml` 中的版本和 integrity；
-7. Harness 能启动 `web --host 127.0.0.1 --port 0 --no-open`，完成 token 换取并回答
+8. Harness 能启动 `web --host 127.0.0.1 --port 0 --no-open`，完成 token 换取并回答
    `settings/describe`；该步骤同时验证「带固定市场版本的 profile 能正常启动」；
-8. 探测后进程仍存活，并在收到 SIGTERM 后正常退出；
-9. 启动期间在 Harness 下观察到过的子进程（Harness 可能 fork 自身的 host 进程）全部退出，
-   不留 orphan。
+9. 探测后进程仍存活，并在收到 SIGTERM 后正常退出；
+10. 启动期间在 Harness 下观察到过的子进程（Harness 可能 fork 自身的 host 进程）全部退出，
+    不留 orphan。
 
-smoke test 不需要账号或 API key。唯一需要网络的是第 6 步（安装插件市场），可用
+smoke test 不需要账号或 API key。唯一需要网络的是第 7 步（安装插件市场），可用
 `DSH_RUNTIME_SMOKE_SKIP_PLUGIN_MARKET=1` 跳过。运行环境隔离：`HOME`、`XDG_*`、`DSH_HOME` 均
 指向临时目录，不读写真实用户数据。该步骤的 install 脚本策略与 App 一致（禁用），见
 `docs/runtime-contract.md` 第 3 节。
 
-**不覆盖**：不创建 session、不调用模型、不验证插件市场自身的 HTTP 路由与界面交互。
+**不覆盖**：不创建 session、不调用模型、不验证插件市场自身的 HTTP 路由与界面交互；也不执行真实的
+受限命令，因此「客户端机器上 Seatbelt 是否可用」只能由客户端在真实运行环境中判定，见
+[`docs/runtime-contract.md`](docs/runtime-contract.md) 第 8 节。
 
 ## 9. DSH Studio 如何消费
 

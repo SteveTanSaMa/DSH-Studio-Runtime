@@ -401,24 +401,29 @@ Smoke test checks:
 4. `node-pty` and, when present, `fs-ext` and `koffi` actually load in the packaged Node (the latter
    two ship their native binaries inside platform-specific optional dependencies, so a wrong
    architecture only shows up when they are loaded);
-5. a pty can really spawn a process and return its output (exercising `spawn-helper`);
-6. when the manifest carries a plugin market pin, it is installed into a scratch profile exactly as the
+5. the security-relevant seam ships and loads in the packaged Node: `@deepseek-ai/dsh-sandbox-local`,
+   `-sandbox-policy` (its three mode names are unchanged) and `dsh-credentials-local`; the installed
+   `koffi` version must also match the exact pin upstream declares (it is the Harness's only native
+   runtime dependency and must not move silently);
+6. a pty can really spawn a process and return its output (exercising `spawn-helper`);
+7. when the manifest carries a plugin market pin, it is installed into a scratch profile exactly as the
    app does it, and the profile's `package.json`, `node_modules` version, and `pnpm-lock.yaml` version
    and integrity are checked;
-7. Harness starts with `web --host 127.0.0.1 --port 0 --no-open`, exchanges the token, and answers
+8. Harness starts with `web --host 127.0.0.1 --port 0 --no-open`, exchanges the token, and answers
    `settings/describe` — which also proves a profile carrying the pinned market boots;
-8. the process is still alive after the probe and exits cleanly on SIGTERM;
-9. every process observed under Harness while it was running is gone afterwards (Harness may fork its
-   own host process), so no orphan outlives the shutdown.
+9. the process is still alive after the probe and exits cleanly on SIGTERM;
+10. every process observed under Harness while it was running is gone afterwards (Harness may fork its
+    own host process), so no orphan outlives the shutdown.
 
-The smoke test needs no account and no API key. Only step 6 requires the network (the market install)
+The smoke test needs no account and no API key. Only step 7 requires the network (the market install)
 and can be skipped with `DSH_RUNTIME_SMOKE_SKIP_PLUGIN_MARKET=1`. The environment is isolated: `HOME`,
 `XDG_*`, and `DSH_HOME` all point into a temporary directory, so no real user data is read or written.
 That step installs with scripts disabled, matching the app's policy; see section 3 of
 `docs/runtime-contract.md`.
 
-**Not covered**: the smoke test creates no session, calls no model, and does not exercise the plugin
-market's own HTTP routes or UI.
+**Not covered**: the smoke test creates no session, calls no model, does not exercise the plugin
+market's own HTTP routes or UI, and runs no confined command — whether Seatbelt is usable on a given
+client machine can only be decided there, see section 8 of [`docs/runtime-contract.md`](docs/runtime-contract.md).
 
 ## 9. How DSH Studio consumes the catalog
 

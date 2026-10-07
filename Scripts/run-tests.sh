@@ -151,6 +151,21 @@ make_fake_runtime() {
     : > "$harness_root/node_modules/node-pty/prebuilds/darwin-arm64/pty.node"
     : > "$harness_root/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper"
     chmod +x "$harness_root/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper"
+    # The confinement seam and the credential provider are loaded by the smoke
+    # test, so the fixture carries stubs with the shape the published packages
+    # have (ESM entry point, provider class, mode list).
+    for stub in dsh-sandbox-local dsh-credentials-local; do
+        mkdir -p "$harness_root/node_modules/@deepseek-ai/$stub/lib"
+        printf '{"name":"@deepseek-ai/%s","type":"module","main":"lib/index.js"}\n' "$stub" \
+            > "$harness_root/node_modules/@deepseek-ai/$stub/package.json"
+        printf 'export default class Provider {}\n' \
+            > "$harness_root/node_modules/@deepseek-ai/$stub/lib/index.js"
+    done
+    mkdir -p "$harness_root/node_modules/@deepseek-ai/dsh-sandbox-policy/lib"
+    printf '{"name":"@deepseek-ai/dsh-sandbox-policy","type":"module","main":"lib/index.js"}\n' \
+        > "$harness_root/node_modules/@deepseek-ai/dsh-sandbox-policy/package.json"
+    printf 'export const SANDBOX_MODES = ["read-only", "workspace-write", "danger-full-access"];\n' \
+        > "$harness_root/node_modules/@deepseek-ai/dsh-sandbox-policy/lib/index.js"
     cat > "$root/manifest.json" <<'JSON'
 {
   "schemaVersion": 3,
@@ -651,6 +666,30 @@ make_fake_runtime "$WORK_DIR/fake-mislabelled"
 edit_json "$WORK_DIR/fake-mislabelled/manifest.json" 'value.architecture = "darwin-x64"'
 expect_failure "refuses a manifest that mislabels the architecture" \
     "$SCRIPT_DIR/runtime-smoke.sh" "$WORK_DIR/fake-mislabelled"
+
+make_fake_runtime "$WORK_DIR/fake-no-seam"
+rm -rf "$WORK_DIR/fake-no-seam/harness/darwin-arm64/0.1.1-rc.2/node_modules/@deepseek-ai/dsh-sandbox-local"
+expect_failure_matching "refuses a Runtime without the confinement seam" \
+    "the confinement seam did not load with the packaged Node" \
+    "$SCRIPT_DIR/runtime-smoke.sh" "$WORK_DIR/fake-no-seam"
+
+make_fake_runtime "$WORK_DIR/fake-missing-mode"
+printf 'export const SANDBOX_MODES = ["read-only", "danger-full-access"];\n' \
+    > "$WORK_DIR/fake-missing-mode/harness/darwin-arm64/0.1.1-rc.2/node_modules/@deepseek-ai/dsh-sandbox-policy/lib/index.js"
+expect_failure_matching "refuses a Runtime whose sandbox policy dropped a mode" \
+    "dropped the workspace-write mode" \
+    "$SCRIPT_DIR/runtime-smoke.sh" "$WORK_DIR/fake-missing-mode"
+
+make_fake_runtime "$WORK_DIR/fake-unpinned-koffi"
+mkdir -p "$WORK_DIR/fake-unpinned-koffi/harness/darwin-arm64/0.1.1-rc.2/node_modules/koffi" \
+    "$WORK_DIR/fake-unpinned-koffi/harness/darwin-arm64/0.1.1-rc.2/node_modules/@deepseek-ai/dsh-fs-local"
+printf '{"name":"koffi","version":"3.1.0"}\n' \
+    > "$WORK_DIR/fake-unpinned-koffi/harness/darwin-arm64/0.1.1-rc.2/node_modules/koffi/package.json"
+printf '{"name":"@deepseek-ai/dsh-fs-local","version":"0.1.1-rc.2","dependencies":{"koffi":"3.1.1"}}\n' \
+    > "$WORK_DIR/fake-unpinned-koffi/harness/darwin-arm64/0.1.1-rc.2/node_modules/@deepseek-ai/dsh-fs-local/package.json"
+expect_failure_matching "refuses a Runtime whose native FFI version moved off its pin" \
+    "koffi 3.1.0 does not match the pinned 3.1.1" \
+    "$SCRIPT_DIR/runtime-smoke.sh" "$WORK_DIR/fake-unpinned-koffi"
 
 echo "trust anchor"
 expect_success "keys/runtime-catalog-public.txt holds a usable Ed25519 key" \

@@ -75,6 +75,60 @@ SPAWN_HELPER="$HARNESS_ROOT/node_modules/node-pty/prebuilds/$ARCHITECTURE/spawn-
 [ -f "$PTY_BINARY" ] || fail "node-pty binary is missing"
 [ -x "$SPAWN_HELPER" ] || fail "node-pty helper is not executable"
 
+# Confinement is what keeps a mistaken or compromised tool call inside its
+# file-effect policy, and the credential provider is what keeps a secret out of
+# configuration. A tree that lost either would still boot, so load them with the
+# packaged Node: a missing package or an unresolvable transitive dependency has
+# to fail the build instead of a user's confined command.
+(
+    cd "$HARNESS_ROOT"
+    "$NODE_EXECUTABLE" --input-type=module -e '
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+
+const sandbox = await import("@deepseek-ai/dsh-sandbox-local");
+const policy = await import("@deepseek-ai/dsh-sandbox-policy");
+const credentials = await import("@deepseek-ai/dsh-credentials-local");
+
+if (typeof sandbox.default !== "function") {
+  throw new Error("the sandbox provider no longer exports a provider class");
+}
+if (typeof credentials.default !== "function") {
+  throw new Error("the credential provider no longer exports a provider class");
+}
+for (const mode of ["read-only", "workspace-write", "danger-full-access"]) {
+  if (!policy.SANDBOX_MODES.includes(mode)) throw new Error(`the sandbox policy dropped the ${mode} mode`);
+}
+
+// koffi is the Harness FFI library and its only native runtime dependency.
+// Upstream pins it exactly, so the installed version has to be one of those
+// pins: a resolution that quietly moves it must not ship.
+const pins = new Set();
+const manifests = ["package.json"];
+const scope = "node_modules/@deepseek-ai";
+if (existsSync(scope)) {
+  for (const name of readdirSync(scope)) manifests.push(`${scope}/${name}/package.json`);
+}
+for (const file of manifests) {
+  if (!existsSync(file)) continue;
+  const manifest = JSON.parse(readFileSync(file, "utf8"));
+  for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {
+    const pin = (manifest[field] || {}).koffi;
+    if (typeof pin === "string" && /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(pin)) pins.add(pin);
+  }
+}
+if (pins.size > 0) {
+  if (!existsSync("node_modules/koffi/package.json")) throw new Error("koffi is pinned but not installed");
+  const installed = JSON.parse(readFileSync("node_modules/koffi/package.json", "utf8")).version;
+  for (const pin of pins) {
+    if (pin !== installed) throw new Error(`koffi ${installed} does not match the pinned ${pin}`);
+  }
+  process.stdout.write(`runtime-smoke: confinement seam and credential provider load, koffi ${installed} matches its pin\n`);
+} else {
+  process.stdout.write("runtime-smoke: confinement seam and credential provider load\n");
+}
+'
+) || fail "the confinement seam did not load with the packaged Node"
+
 # The x64 Runtime is built on an Apple Silicon runner, where a wrongly built
 # binary still runs under Rosetta. Ask the Mach-O headers directly instead. This
 # needs macOS; every check above is structural and therefore runs anywhere.

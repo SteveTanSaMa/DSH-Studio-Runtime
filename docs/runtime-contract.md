@@ -235,3 +235,31 @@ manifest 字段与 catalog release 一致。三个层级因此落在：
 | 改 manifest `schemaVersion` | 不兼容（客户端只接受 3） |
 | 改 `architecture` 的取值格式 | 不兼容 |
 | 改信封字段名或签名算法 | 不兼容（需要同时更新 App 与签名流程） |
+
+## 8. Harness 安全姿态（随 Runtime 发布，客户端要遵守）
+
+Runtime 打包的 Harness 自带两层安全能力，随 artifact 一起发布，不需要客户端额外配置：
+
+- **文件效果沙箱**：子进程按策略运行，模式取自 `@deepseek-ai/dsh-sandbox-policy` 导出的
+  `SANDBOX_MODES` —— `read-only`（fail-safe 默认）、`workspace-write`（仅会话工作区）、
+  `danger-full-access`。macOS 走 `sandbox-exec`（Seatbelt）套用生成的 profile；Linux 走
+  bwrap → Landlock；Windows 走 ACL 受限令牌（后两者与我们发布的 darwin artifact 无关）。
+- **凭据引用**：配置里只写凭据名，值存在 `$DSH_HOME/.env`（文件 `0600`、目录 `0700`、原子写入），
+  该次运行的进程环境变量优先；不依赖 macOS Keychain，因此无 GUI / headless 环境同样可用。
+
+**fail closed 是硬语义**：Harness 在第一次真正需要 confinement 时函数式探测 runner（用真实的
+`read-only` profile 执行一次 `sandbox-exec … -- true`）并缓存结果；探测失败时抛
+`SandboxUnavailableError`，**不会**退化成不加限制地执行原命令。被拒绝的受限调用可以经用户批准的
+一次性 escalation 重试。
+
+客户端由此承担的义务：
+
+- 不要让它运行在无法套用 Seatbelt profile 的环境里（例如把 Runtime 放进 App Sandbox）；当前
+  DSH Studio 没有 App Sandbox 权利，这一点是满足的。
+- 把「sandbox unavailable」当成明确错误呈现给用户，不要静默继续，也不要替用户放宽模式。
+- 一次性 escalation 必须由用户本人批准。
+
+发布侧验证：`runtime-smoke.sh` 断言这些包随 artifact 存在、能被打包的 Node 加载、模式列表未被
+改名，并且 **koffi**（Harness 唯一的原生运行时依赖，上游按精确版本 pin）的已安装版本与 pin 一致。
+它**不**执行真实的受限命令（那需要 session 与模型），也**不**验证客户端机器上的 Seatbelt 可用性
+——后者只能由客户端在真实运行环境里判定。
