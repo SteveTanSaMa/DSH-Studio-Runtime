@@ -171,9 +171,6 @@ require_module() {
 }
 
 require_module node-pty
-if [ -d "$HARNESS_ROOT/node_modules/fs-ext" ]; then
-    require_module fs-ext
-fi
 # koffi is a native FFI library whose binding arrives through a platform-specific
 # optional dependency; a wrong architecture or a missing optional package only
 # fails when it is loaded, so load it here as well.

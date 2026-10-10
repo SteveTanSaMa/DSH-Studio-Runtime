@@ -13,6 +13,11 @@ set -euo pipefail
 #
 # Usage: RUNTIME_CATALOG_PRIVATE_KEY_BASE64=... RUNTIME_CATALOG_PUBLIC_KEY=... \
 #            $0 CATALOG_JSON OUTPUT_SIGNED_JSON
+#
+# The private key can be given two ways, and both are supported because an
+# operator restoring one from a backup may hold either form:
+#   RUNTIME_CATALOG_PRIVATE_KEY_BASE64   base64-encoded PKCS#8 DER (what CI uses)
+#   RUNTIME_CATALOG_PRIVATE_KEY_PATH     a PEM file or a raw PKCS#8 DER file
 
 INPUT_PATH="${1:-}"
 OUTPUT_PATH="${2:-}"
@@ -47,15 +52,35 @@ const fs = require("fs");
 
 const [inputPath, outputPath, keyID] = process.argv.slice(2);
 
-function sign() {
+function loadPrivateKey() {
   const privateKeyBase64 = process.env.RUNTIME_CATALOG_PRIVATE_KEY_BASE64;
+  if (privateKeyBase64) {
+    return crypto.createPrivateKey({
+      key: Buffer.from(privateKeyBase64, "base64"),
+      format: "der",
+      type: "pkcs8"
+    });
+  }
+
   const privateKeyPath = process.env.RUNTIME_CATALOG_PRIVATE_KEY_PATH;
-  const keyMaterial = privateKeyBase64
-    ? Buffer.from(privateKeyBase64, "base64")
-    : fs.readFileSync(privateKeyPath);
-  const privateKey = privateKeyBase64
-    ? crypto.createPrivateKey({ key: keyMaterial, format: "der", type: "pkcs8" })
-    : crypto.createPrivateKey(keyMaterial);
+  const keyMaterial = fs.readFileSync(privateKeyPath);
+  // PEM is self-describing; a PKCS#8 DER file is not, so its format is declared
+  // here. Accepting both keeps a restore from a backup working whichever form
+  // the operator saved.
+  if (keyMaterial.subarray(0, 11).toString("utf8") === "-----BEGIN ") {
+    return crypto.createPrivateKey(keyMaterial);
+  }
+  try {
+    return crypto.createPrivateKey({ key: keyMaterial, format: "der", type: "pkcs8" });
+  } catch (error) {
+    throw new Error(
+      `the private key file is neither PEM nor PKCS#8 DER (${privateKeyPath}): ${error.message}. ` +
+      "Base64-encoded PKCS#8 DER belongs in RUNTIME_CATALOG_PRIVATE_KEY_BASE64 instead");
+  }
+}
+
+function sign() {
+  const privateKey = loadPrivateKey();
 
   const derivedPublicKey = crypto
     .createPublicKey(privateKey)

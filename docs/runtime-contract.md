@@ -146,8 +146,9 @@ Harness 带着它启动）。
 安装市场时**禁用 install / lifecycle script**（`npm_config_ignore_scripts=true`）：市场是
 已构建好的 tarball，安装它不该执行任何包内脚本。这是客户端策略而不是 smoke 测试的临时
 限制，`runtime-smoke.sh` 用同样的策略安装，所以它验证的就是用户真实得到的行为。Runtime
-自身的依赖闭包同样整体禁用脚本，需要构建的包（`fs-ext`）由 `build-runtime.sh` 显式处理，
-并且由 `Scripts/audit-dependencies.js` 保证不会有新的包悄悄漏进来。
+自身的依赖闭包同样整体禁用脚本，需要构建的包由 `build-runtime.sh` 显式处理，并且由
+`Scripts/audit-dependencies.js` 保证不会有新的包悄悄漏进来；当前线已不再需要构建 `fs-ext`
+（上游改用 Node-API 模块），若它重新出现，构建会直接失败而不是产出未构建的绑定。
 
 ## 4. Artifact 布局与 manifest（`schemaVersion: 3`）
 

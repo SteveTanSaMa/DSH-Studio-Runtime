@@ -201,40 +201,20 @@ printf 'Resolving Harness %s and pnpm %s\n' "$HARNESS_VERSION" "$PNPM_VERSION"
 "$NODE_EXECUTABLE" "$SCRIPT_DIR/audit-dependencies.js" "$HARNESS_ROOT/package-lock.json" || die \
     "dependency audit failed"
 
-# @deepseek-ai/dsh-session-persistence-jsonl (added in Harness 0.1.3-alpha.2)
-# depends on fs-ext, a native module that ships no prebuilt binding and is
-# built by its install script. Keep --ignore-scripts for the rest of the tree,
-# but compile just this module here so the packaged Runtime boots on macOS.
-# node-gyp's shebang runs "env node", so the downloaded Node must lead PATH;
-# otherwise the hosted runner's own Node builds the binding against a
-# different NODE_MODULE_VERSION and dlopen fails at boot.
+# Upstream replaced fs-ext with the Node-API based @deepseek-ai/node-addon-system,
+# so no version built from 0.2.0-rc.1 onward carries fs-ext at all (verified
+# against the published lockfiles and the installed trees). The compile step this
+# script used to run is therefore gone. If a Harness version ever reintroduces a
+# native module that needs an install script, the build must fail rather than ship
+# an unbuilt binding: the smoke test creates no session, so the failure would
+# otherwise surface only on a user's machine.
 FS_EXT_ROOT="$HARNESS_ROOT/node_modules/fs-ext"
 if [ -d "$FS_EXT_ROOT" ]; then
-    if [ ! -f "$FS_EXT_ROOT/build/Release/fs_ext.node" ]; then
-        printf 'Compiling fs-ext native binding for %s\n' "$ARCHITECTURE"
-        (
-            cd "$HARNESS_ROOT"
-            PATH="$(dirname "$NODE_EXECUTABLE"):$PATH" \
-                "$NODE_EXECUTABLE" "$NPM_CLI" rebuild fs-ext
-        )
+    if "$NODE_EXECUTABLE" -e 'require(process.argv[1])' "$FS_EXT_ROOT" 2>/dev/null; then
+        printf 'WARNING: this Harness version still ships fs-ext; it loaded without a build step.\n' >&2
+    else
+        die "this Harness version depends on fs-ext, which the Runtime no longer builds: restore explicit handling for it in this script (see the git history), verify it in runtime-smoke.sh, and only then publish"
     fi
-
-    # Always load the binding, whether it was rebuilt here or came prebuilt:
-    # a wrong architecture or a wrong ABI only fails at boot, when a session is
-    # created, which is far too late to catch during a release.
-    "$NODE_EXECUTABLE" -e 'require(process.argv[1])' "$FS_EXT_ROOT" || die \
-        "fs-ext native binding failed to load with the packaged Node"
-
-    # node-gyp leaves object files, dependency files and Makefiles carrying
-    # absolute build paths inside build/. Keep only the loadable binding so the
-    # immutable artifact carries no temporary build material.
-    if [ -d "$FS_EXT_ROOT/build" ]; then
-        find "$FS_EXT_ROOT/build" -type f ! -name '*.node' -delete
-        find "$FS_EXT_ROOT/build" -mindepth 1 -type d -empty -delete
-    fi
-
-    "$NODE_EXECUTABLE" -e 'require(process.argv[1])' "$FS_EXT_ROOT" || die \
-        "fs-ext native binding failed to load after removing build material"
 fi
 
 HARNESS_ENTRY="$HARNESS_ROOT/node_modules/@deepseek-ai/dsh/lib/bin.js"

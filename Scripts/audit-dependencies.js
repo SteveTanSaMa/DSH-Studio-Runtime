@@ -70,8 +70,8 @@ function audit(lockPath) {
     throw new Error(
       `${unexpected.length} package(s) in the resolved graph declare an install script the Runtime does ` +
       `not run: ${unexpected.join(", ")}. Decide explicitly, then re-run: handle the package in ` +
-      "build-runtime.sh the way fs-ext is handled and verify it in runtime-smoke.sh, or add it to " +
-      "ALLOWED_INSTALL_SCRIPTS in Scripts/audit-dependencies.js with the reason it needs no build step");
+      "build-runtime.sh (build or fetch the binding there) and verify it in runtime-smoke.sh, or add it " +
+      "to ALLOWED_INSTALL_SCRIPTS in Scripts/audit-dependencies.js with the reason it needs no build step");
   }
 
   process.stdout.write(

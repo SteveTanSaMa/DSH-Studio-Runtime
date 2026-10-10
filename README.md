@@ -314,7 +314,7 @@ DSH_RUNTIME_DATA_FORMAT_ID=sqlite-v2 \
   ./Scripts/build-runtime.sh
 ```
 
-流程：下载并校验 Node → 解析 Harness 与 pnpm 依赖 → 编译原生模块（如 `fs-ext`）→ 生成
+流程：下载并校验 Node → 解析 Harness 与 pnpm 依赖 → 依赖脚本审计与原生模块校验 → 生成
 `manifest.json` → 打包 → 计算 SHA-256 → 解包到临时目录并运行 smoke test → 在 `OUTPUT_DIR`
 写出 artifact、manifest 与 metadata。
 
@@ -372,7 +372,7 @@ smoke test 的检查项：
 2. 打包的 Node 与 pnpm 可执行，版本与 manifest 相符；
 3. `node`、`node-pty/pty.node`、`spawn-helper` 的 Mach-O 架构与 manifest 一致（x64 在 Apple
    Silicon runner 上通过 Rosetta 构建，仅验证「能运行」会漏掉错架构）；
-4. `node-pty` 与（若存在）`fs-ext`、`koffi` 能被打包的 Node 真正加载（后两者的原生二进制来自
+4. `node-pty` 与（若存在）`koffi` 能被打包的 Node 真正加载（koffi 的原生二进制来自
    平台相关的 optional dependency，装错架构只有加载时才暴露）；
 5. 安全相关的封装随 artifact 存在且能被打包的 Node 加载：`@deepseek-ai/dsh-sandbox-local`、
    `-sandbox-policy`（三个模式名未被改名）、`dsh-credentials-local`；同时断言 `koffi` 的已安装
@@ -443,6 +443,7 @@ smoke test 不需要账号或 API key。唯一需要网络的是第 7 步（安�
 | [`docs/key-custody-runbook.md`](docs/key-custody-runbook.md) | 签名私钥的备份、恢复演练与泄露/丢失应急（含"尚未备份"的明确标记） |
 | [`docs/repack-policy.md`](docs/repack-policy.md) | 同版本重新打包的定位、身份模型核对与跨仓库验收规则 |
 | [`docs/data-compatibility-contract.md`](docs/data-compatibility-contract.md) | 数据兼容性契约草案（基于官方 session-format 代际，待 App 侧协同后切换） |
+| [`docs/cron-skip-list-design.md`](docs/cron-skip-list-design.md) | cron 版本发现的显式跳过列表设计（阶段 C 输入，未实施） |
 
 | 工具 | 作用 |
 | --- | --- |

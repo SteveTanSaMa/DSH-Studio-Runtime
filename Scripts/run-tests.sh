@@ -383,6 +383,45 @@ expect_failure "refuses two private key sources at once" \
     env RUNTIME_CATALOG_PRIVATE_KEY_BASE64="$PRIVATE_KEY" RUNTIME_CATALOG_PRIVATE_KEY_PATH="$WORK_DIR/keypair.txt" \
     RUNTIME_CATALOG_PUBLIC_KEY="$PUBLIC_KEY" \
     "$SCRIPT_DIR/sign-runtime-catalog.sh" "$WORK_DIR/ok/catalog.json" "$WORK_DIR/ok/two-keys.signed.json"
+
+# The key can also be read from a file, which is the shape an operator restoring
+# it from a backup may hold: PEM is self-describing, a PKCS#8 DER file is not.
+node -e '
+const crypto = require("crypto");
+const fs = require("fs");
+const der = Buffer.from(process.argv[1], "base64");
+const dir = process.argv[2];
+const key = crypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
+fs.writeFileSync(dir + "/key.der", der, { mode: 0o600 });
+fs.writeFileSync(dir + "/key.pem", key.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
+const corrupted = Buffer.from(der);
+corrupted[corrupted.length - 1] ^= 0x01;
+fs.writeFileSync(dir + "/key-corrupted.der", corrupted, { mode: 0o600 });
+fs.writeFileSync(dir + "/key-not-a-key.txt", "not a private key\n", { mode: 0o600 });
+' "$PRIVATE_KEY" "$WORK_DIR"
+expect_success "signs with a PKCS#8 DER key file" \
+    env RUNTIME_CATALOG_PRIVATE_KEY_PATH="$WORK_DIR/key.der" RUNTIME_CATALOG_PUBLIC_KEY="$PUBLIC_KEY" \
+    "$SCRIPT_DIR/sign-runtime-catalog.sh" "$WORK_DIR/ok/catalog.json" "$WORK_DIR/ok/der.signed.json"
+expect_success "signs with a PEM key file" \
+    env RUNTIME_CATALOG_PRIVATE_KEY_PATH="$WORK_DIR/key.pem" RUNTIME_CATALOG_PUBLIC_KEY="$PUBLIC_KEY" \
+    "$SCRIPT_DIR/sign-runtime-catalog.sh" "$WORK_DIR/ok/catalog.json" "$WORK_DIR/ok/pem.signed.json"
+expect_success "produces the same signature from base64 DER, a DER file and a PEM file" \
+    node -e '
+const assert = require("assert");
+const fs = require("fs");
+const dir = process.argv[1];
+const signatureOf = (name) => JSON.parse(fs.readFileSync(`${dir}/${name}`, "utf8")).signature;
+const fromBase64 = signatureOf("catalog.signed.json");
+assert.strictEqual(signatureOf("der.signed.json"), fromBase64, "the DER key file signed differently");
+assert.strictEqual(signatureOf("pem.signed.json"), fromBase64, "the PEM key file signed differently");
+' "$WORK_DIR/ok"
+expect_failure "refuses to sign with a corrupted key file" \
+    env RUNTIME_CATALOG_PRIVATE_KEY_PATH="$WORK_DIR/key-corrupted.der" RUNTIME_CATALOG_PUBLIC_KEY="$PUBLIC_KEY" \
+    "$SCRIPT_DIR/sign-runtime-catalog.sh" "$WORK_DIR/ok/catalog.json" "$WORK_DIR/ok/corrupted-key.signed.json"
+expect_failure_matching "refuses a key file that is neither PEM nor PKCS#8 DER" \
+    "neither PEM nor PKCS#8 DER" \
+    env RUNTIME_CATALOG_PRIVATE_KEY_PATH="$WORK_DIR/key-not-a-key.txt" RUNTIME_CATALOG_PUBLIC_KEY="$PUBLIC_KEY" \
+    "$SCRIPT_DIR/sign-runtime-catalog.sh" "$WORK_DIR/ok/catalog.json" "$WORK_DIR/ok/not-a-key.signed.json"
 expect_failure "rejects a catalog whose signature does not match" \
     "$SCRIPT_DIR/verify-runtime-catalog.sh" \
     "$WORK_DIR/ok/catalog.signed.json" "$(cat "$WORK_DIR/other-public-key.txt")"

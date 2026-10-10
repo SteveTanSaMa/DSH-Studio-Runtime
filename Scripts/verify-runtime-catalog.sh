@@ -5,6 +5,10 @@ set -euo pipefail
 #
 # Usage: verify-runtime-catalog.sh SIGNED_JSON PUBLIC_KEY_BASE64 [PAYLOAD_OUT]
 #
+# The expected key ID is *not* a positional argument: it comes from the
+# environment variable RUNTIME_CATALOG_KEY_ID and defaults to runtime-catalog-v1.
+# Set it to check an envelope signed under a different key ID.
+#
 # The public key is the base64-encoded raw Ed25519 key that DSH Studio embeds as
 # its trust anchor (keys/runtime-catalog-public.txt). Every check fails closed:
 # an unreadable envelope, an unexpected schema version or key ID, a key of the

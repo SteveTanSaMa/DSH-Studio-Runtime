@@ -335,8 +335,8 @@ DSH_RUNTIME_DATA_FORMAT_ID=sqlite-v2 \
   ./Scripts/build-runtime.sh
 ```
 
-Sequence: download and verify Node → resolve Harness and pnpm dependencies → compile native modules
-(for example `fs-ext`) → generate `manifest.json` → package → compute SHA-256 → extract to a temporary
+Sequence: download and verify Node → resolve Harness and pnpm dependencies → install-script audit and
+native-module checks → generate `manifest.json` → package → compute SHA-256 → extract to a temporary
 directory and run the smoke test → write the artifact, manifest and metadata under `OUTPUT_DIR`.
 
 | Variable | Default | Description |
@@ -398,9 +398,9 @@ Smoke test checks:
 3. `node`, `node-pty/pty.node` and `spawn-helper` carry the Mach-O architecture the manifest claims
    (x64 is built on an Apple Silicon runner through Rosetta, where "it runs" would not catch a wrong
    architecture);
-4. `node-pty` and, when present, `fs-ext` and `koffi` actually load in the packaged Node (the latter
-   two ship their native binaries inside platform-specific optional dependencies, so a wrong
-   architecture only shows up when they are loaded);
+4. `node-pty` and, when present, `koffi` actually load in the packaged Node (koffi's native binary
+   ships inside a platform-specific optional dependency, so a wrong architecture only shows up when it
+   is loaded);
 5. the security-relevant seam ships and loads in the packaged Node: `@deepseek-ai/dsh-sandbox-local`,
    `-sandbox-policy` (its three mode names are unchanged) and `dsh-credentials-local`; the installed
    `koffi` version must also match the exact pin upstream declares (it is the Harness's only native
@@ -479,6 +479,7 @@ Full fields and semantics: [`docs/runtime-contract.md`](docs/runtime-contract.md
 | [`docs/key-custody-runbook.md`](docs/key-custody-runbook.md) | Signing-key backup, restore rehearsal, leak/loss response (marked explicitly as *not yet backed up*) |
 | [`docs/repack-policy.md`](docs/repack-policy.md) | Same-version repack: positioning, identity-model review, cross-repo acceptance rules |
 | [`docs/data-compatibility-contract.md`](docs/data-compatibility-contract.md) | Data-compatibility contract draft (built on the official session-format generation; switches only after the app agrees) |
+| [`docs/cron-skip-list-design.md`](docs/cron-skip-list-design.md) | Cron version discovery: explicit skip-list design (Phase C input, not implemented) |
 
 The `docs/` files are currently Chinese only.
 
