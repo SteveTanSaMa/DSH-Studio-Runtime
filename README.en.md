@@ -476,6 +476,9 @@ Full fields and semantics: [`docs/runtime-contract.md`](docs/runtime-contract.md
 | [`docs/runtime-contract.md`](docs/runtime-contract.md) | URL, schema, and semantic contract with the client |
 | [`docs/runtime-catalog-keys.md`](docs/runtime-catalog-keys.md) | Signing key correspondence and rotation |
 | [`docs/historical-versions.md`](docs/historical-versions.md) | Rebuildable range and dependency-drift evidence |
+| [`docs/key-custody-runbook.md`](docs/key-custody-runbook.md) | Signing-key backup, restore rehearsal, leak/loss response (marked explicitly as *not yet backed up*) |
+| [`docs/repack-policy.md`](docs/repack-policy.md) | Same-version repack: positioning, identity-model review, cross-repo acceptance rules |
+| [`docs/data-compatibility-contract.md`](docs/data-compatibility-contract.md) | Data-compatibility contract draft (built on the official session-format generation; switches only after the app agrees) |
 
 The `docs/` files are currently Chinese only.
 

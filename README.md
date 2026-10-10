@@ -440,6 +440,9 @@ smoke test 不需要账号或 API key。唯一需要网络的是第 7 步（安�
 | [`docs/runtime-contract.md`](docs/runtime-contract.md) | 与客户端之间的 URL、schema 与语义契约 |
 | [`docs/runtime-catalog-keys.md`](docs/runtime-catalog-keys.md) | 签名密钥的对应关系与轮换步骤 |
 | [`docs/historical-versions.md`](docs/historical-versions.md) | 可重建范围与依赖漂移证据 |
+| [`docs/key-custody-runbook.md`](docs/key-custody-runbook.md) | 签名私钥的备份、恢复演练与泄露/丢失应急（含"尚未备份"的明确标记） |
+| [`docs/repack-policy.md`](docs/repack-policy.md) | 同版本重新打包的定位、身份模型核对与跨仓库验收规则 |
+| [`docs/data-compatibility-contract.md`](docs/data-compatibility-contract.md) | 数据兼容性契约草案（基于官方 session-format 代际，待 App 侧协同后切换） |
 
 | 工具 | 作用 |
 | --- | --- |
