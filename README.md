@@ -170,8 +170,16 @@ harness/<architecture>/<harnessVersion>/...
 | 每小时 cron | 扫描上游 `dsh-v*` release（按发布时间升序）：已存在 `runtime-<version>` release 的版本跳过；npm 上未发布 `@deepseek-ai/dsh@<version>` 的版本跳过并告警；否则构建该版本并结束本次运行（每次最多发布一个版本） |
 
 `UPSTREAM_MIN_HARNESS_VERSION`（当前 `0.1.7-rc.2`）及其之前的版本被视为已处理，轮询从
-`0.2.0-rc.1` 起。该下限必须停在最后一个不可重建的版本上，否则轮询会反复尝试构建一个必然失败的
-旧版本，且永远不会到达更新的版本（原因见 [`docs/historical-versions.md`](docs/historical-versions.md)）。
+`0.2.0-rc.1` 起。该下限必须停在最后一个不可重建的版本上（原因见
+[`docs/historical-versions.md`](docs/historical-versions.md)）。
+
+如果**下限之上**的某个版本反复构建失败，不再把下限往前推，而是给它写一条跳过记录：
+[`Scripts/skipped-runtime-versions.txt`](Scripts/skipped-runtime-versions.txt)（`版本 | 截止日期 | 原因`，
+三项都必填）。跳过只把该版本从候选里移除，**不改变任何发布语义**：候选仍按上游发布时间升序，
+命中跳过会打 `::warning::` 并附原因与截止日期，截止日期过后自动重新成为候选并再次告警。
+写入非法记录（缺项、非法日期）会让整次选择 fail closed，而不是静默改变构建目标。
+选择逻辑本身在 [`Scripts/select-next-runtime-version.sh`](Scripts/select-next-runtime-version.sh)，
+不访问网络，因此可离线测试；npm 可用性检查仍留在 workflow 里。
 
 ### 流水线顺序
 
@@ -443,7 +451,7 @@ smoke test 不需要账号或 API key。唯一需要网络的是第 7 步（安�
 | [`docs/key-custody-runbook.md`](docs/key-custody-runbook.md) | 签名私钥的备份、恢复演练与泄露/丢失应急（含"尚未备份"的明确标记） |
 | [`docs/repack-policy.md`](docs/repack-policy.md) | 同版本重新打包的定位、身份模型核对与跨仓库验收规则 |
 | [`docs/data-compatibility-contract.md`](docs/data-compatibility-contract.md) | 数据兼容性契约草案（基于官方 session-format 代际，待 App 侧协同后切换） |
-| [`docs/cron-skip-list-design.md`](docs/cron-skip-list-design.md) | cron 版本发现的显式跳过列表设计（阶段 C 输入，未实施） |
+| [`docs/cron-skip-list-design.md`](docs/cron-skip-list-design.md) | cron 版本发现的显式跳过列表（已实施，含与设计的差异） |
 
 | 工具 | 作用 |
 | --- | --- |
@@ -451,6 +459,7 @@ smoke test 不需要账号或 API key。唯一需要网络的是第 7 步（安�
 | `.github/workflows/verify.yml` | PR 门禁：离线测试套件（无 secret） |
 | `Scripts/build-runtime.sh` | 构建单个架构的 artifact |
 | `Scripts/audit-dependencies.js` | 拒绝依赖闭包中未登记的 install / native 构建脚本 |
+| `Scripts/select-next-runtime-version.sh` | cron 的版本选择：下限、已发布版本与跳过列表，不访问网络 |
 | `Scripts/runtime-smoke.sh` | 对解包后的 artifact 运行本地 smoke test |
 | `Scripts/lib/process-tree.sh` | 进程树记录、断言与 best-effort 清理（smoke 与测试共用） |
 | `Scripts/tests/process-tree-scenarios.sh` | 用真实进程验证清理语义的场景 |

@@ -1,7 +1,8 @@
 # Cron 版本发现：显式跳过列表设计（阶段 C 输入，**未实施**）
 
-> 状态：**设计，未实施**。本文件不改变任何 workflow；`Scripts/select-next-runtime-version.sh`
-> 与跳过文件都**尚未创建**。阶段 C 放行后才落地，且落地时按第 6 节的最小 diff 进行。
+> 状态：**已实施（阶段 C）**。落地内容：`Scripts/select-next-runtime-version.sh`、
+> `Scripts/skipped-runtime-versions.txt`，以及 `runtime-builder.yml` 中 schedule 分支的选择逻辑。
+> 签名、构建内容、Catalog 生成、上传顺序、已发布产物与 Secret 均未改动。与设计的两处差异见文末。
 
 ## 1. 问题（代码证据）
 
@@ -120,3 +121,24 @@ done
   缓解：`until` 必填且建议不超过一个季度；运行日志每周都会提醒它的存在。
 - 人工登记意味着"有人必须看告警"。这不是自动化缺陷，而是把"静默跳过"换成"显式决定"的代价。
 - 本设计**不**解决"构建失败原因不可见"的问题（那是 run 日志的职责）；它只保证一个失败版本不会冻结整条流水线。
+
+## 8. 实施记录与差异
+
+落地时间：阶段 C。落地文件：
+
+- `Scripts/select-next-runtime-version.sh`（stdout = 候选，stderr = 诊断/警告，退出码 2 = 输入非法）；
+- `Scripts/skipped-runtime-versions.txt`（当前只有注释头，即"今天没有跳过任何版本"）；
+- `.github/workflows/runtime-builder.yml`：schedule 分支改为调用上述脚本，npm 可用性检查留在 workflow；
+  另外删除了不再使用的 `UPSTREAM_RELEASE_TAG_PREFIX` 环境变量，并把 floor 的注释改成指向跳过列表。
+
+与设计的差异：
+
+1. **日期校验是范围校验**（`YYYY-MM-DD`，月 01-12、日 01-31），不做真实日历校验（跨平台 `date`
+   行为不一致，且这里只需要一个可比对的截止日）。因此 `2027-02-31` 会被接受，但会被当作 2 月末
+   之后处理——不影响"不可无限期跳过"的性质。
+2. **新增一条总结性通知**：候选数与"首个候选失败时后面还有几个排队"会明确打印，用于回答
+   "后续版本是否因此再次等待处理"。候选只有一个时会说明"它失败不会挡住任何其它版本"。
+
+真实数据演练（不触发发布）：用线上 26 个上游版本 + 我方 5 个已发布 tag + 当前 floor 跑一次选择，
+输出为**空**（`no candidate … nothing to build`），符合预期；再注入一个假的新上游版本，脚本正确
+选中它并打印"唯一候选"通知。

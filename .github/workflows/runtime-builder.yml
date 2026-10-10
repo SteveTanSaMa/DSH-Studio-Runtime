@@ -84,12 +84,12 @@ jobs:
           DEFAULT_DATA_FORMAT_COMPATIBLE_WITH: ${{ vars.RUNTIME_DATA_FORMAT_COMPATIBLE_WITH }}
           DEFAULT_DATA_FORMAT_MIGRATION: ${{ vars.RUNTIME_DATA_FORMAT_MIGRATION }}
           UPSTREAM_REPOSITORY: deepseek-ai/deepseek-harness
-          UPSTREAM_RELEASE_TAG_PREFIX: dsh-v
           # Everything at or before this version is treated as already handled.
           # Keep it on the last Harness version that cannot be rebuilt with
-          # today's dependency graph (see docs/historical-versions.md): moving it
-          # forward would make the poll try that version forever and never reach
-          # a newer one.
+          # today's dependency graph (see docs/historical-versions.md). A version
+          # that still fails below this line costs nothing; a version *above* it
+          # that keeps failing is handled with an entry in
+          # Scripts/skipped-runtime-versions.txt rather than by moving the floor.
           UPSTREAM_MIN_HARNESS_VERSION: 0.1.7-rc.2
         run: |
           set -euo pipefail
@@ -122,30 +122,40 @@ jobs:
                     '
                 )"
                 runtime_version=""
-                baseline_reached=false
-                while IFS=$'\t' read -r upstream_tag upstream_published_at; do
-                  [ -n "${upstream_tag:-}" ] || continue
-                  harness_version="${upstream_tag#"$UPSTREAM_RELEASE_TAG_PREFIX"}"
-                  if [ "$harness_version" = "$UPSTREAM_MIN_HARNESS_VERSION" ]; then
-                    baseline_reached=true
-                    continue
-                  fi
-                  [ "$baseline_reached" = true ] || continue
-                  # One Harness version is one Runtime: the Runtime version is
-                  # that version, so an existing release means it is already done.
-                  runtime_tag="runtime-${harness_version}"
-                  if gh release view "$runtime_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-                    echo "Runtime release $runtime_tag already exists; skipping Harness release $upstream_tag ($upstream_published_at)."
-                    continue
-                  fi
-                  if ! npm view "@deepseek-ai/dsh@$harness_version" version --registry "https://registry.npmjs.org" >/dev/null 2>&1; then
-                    echo "::warning::Skipping Harness release $upstream_tag because @deepseek-ai/dsh@$harness_version is not published on npm."
-                    continue
-                  fi
-                  runtime_version="$harness_version"
-                  echo "New official Harness release $upstream_tag ($upstream_published_at); building $runtime_tag."
-                  break
-                done <<< "$releases"
+                selection_dir="$RUNNER_TEMP/runtime-selection"
+                mkdir -p "$selection_dir"
+                printf '%s\n' "$releases" > "$selection_dir/upstream-releases.tsv"
+                gh release list --repo "$GITHUB_REPOSITORY" --limit 200 \
+                  --json tagName -q '.[].tagName' > "$selection_dir/published-tags.txt" || true
+                # Selection is a separate, offline-tested script: it applies the
+                # floor, drops versions that already have a release, and applies
+                # the recorded skip list. The npm check stays here because it is
+                # the only network call.
+                selection_failed=false
+                "$GITHUB_WORKSPACE/Scripts/select-next-runtime-version.sh" \
+                  --releases "$selection_dir/upstream-releases.tsv" \
+                  --published "$selection_dir/published-tags.txt" \
+                  --floor "$UPSTREAM_MIN_HARNESS_VERSION" \
+                  --skips "$GITHUB_WORKSPACE/Scripts/skipped-runtime-versions.txt" \
+                  > "$selection_dir/candidates.txt" || selection_failed=true
+                if [ "$selection_failed" = true ]; then
+                  echo "::error::Version selection failed (malformed input or skip list); building nothing rather than guessing."
+                else
+                  while IFS= read -r harness_version || [ -n "$harness_version" ]; do
+                    [ -n "$harness_version" ] || continue
+                    runtime_tag="runtime-${harness_version}"
+                    # One Harness version is one Runtime: a version whose npm
+                    # package is missing is skipped explicitly, never replaced by
+                    # an older candidate.
+                    if ! npm view "@deepseek-ai/dsh@$harness_version" version --registry "https://registry.npmjs.org" >/dev/null 2>&1; then
+                      echo "::warning::Skipping Harness release $harness_version because @deepseek-ai/dsh@$harness_version is not published on npm."
+                      continue
+                    fi
+                    runtime_version="$harness_version"
+                    echo "New official Harness release $harness_version; building $runtime_tag."
+                    break
+                  done < "$selection_dir/candidates.txt"
+                fi
                 if [ -z "$runtime_version" ]; then
                   echo "No unbuilt official Harness release with a published npm package was found."
                   should_build=false

@@ -479,7 +479,7 @@ Full fields and semantics: [`docs/runtime-contract.md`](docs/runtime-contract.md
 | [`docs/key-custody-runbook.md`](docs/key-custody-runbook.md) | Signing-key backup, restore rehearsal, leak/loss response (marked explicitly as *not yet backed up*) |
 | [`docs/repack-policy.md`](docs/repack-policy.md) | Same-version repack: positioning, identity-model review, cross-repo acceptance rules |
 | [`docs/data-compatibility-contract.md`](docs/data-compatibility-contract.md) | Data-compatibility contract draft (built on the official session-format generation; switches only after the app agrees) |
-| [`docs/cron-skip-list-design.md`](docs/cron-skip-list-design.md) | Cron version discovery: explicit skip-list design (Phase C input, not implemented) |
+| [`docs/cron-skip-list-design.md`](docs/cron-skip-list-design.md) | Cron version discovery: explicit skip list (implemented; deviations from the design are listed) |
 
 The `docs/` files are currently Chinese only.
 
@@ -489,6 +489,7 @@ The `docs/` files are currently Chinese only.
 | `.github/workflows/verify.yml` | Pull request gate: the offline test suite (no secrets) |
 | `Scripts/build-runtime.sh` | Build one architecture's artifact |
 | `Scripts/audit-dependencies.js` | Refuse unrecorded install / native build scripts in the closure |
+| `Scripts/select-next-runtime-version.sh` | Cron version selection: floor, published releases and the skip list; no network |
 | `Scripts/runtime-smoke.sh` | Run the local smoke test on an extracted artifact |
 | `Scripts/lib/process-tree.sh` | Record, assert and best-effort clean up a process tree (shared by the smoke and the tests) |
 | `Scripts/tests/process-tree-scenarios.sh` | Scenarios that verify the cleanup against real processes |

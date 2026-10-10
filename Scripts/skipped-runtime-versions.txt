@@ -1,0 +1,24 @@
+# Runtime versions the scheduled build must not attempt.
+#
+# Every line is a deliberate, reviewable decision. Nothing is skipped silently:
+# each hit is reported as a ::warning:: in the run log, and the date is mandatory
+# so a version can never be parked forever.
+#
+# Format (pipe separated, '#' comments and blank lines are ignored):
+#
+#   <version> | <until: YYYY-MM-DD> | <reason>
+#
+#   version  an upstream Harness version, e.g. 0.2.0-rc.1
+#   until    the last day the skip applies; on the day after it the version is a
+#            candidate again and the run says so. Use the shortest honest window.
+#   reason   why it is being skipped; this text appears in every run log.
+#
+# A malformed line (missing version, date or reason, bad date) fails the whole
+# selection: a typo must not silently change which versions get built.
+#
+# This list never bypasses the Catalog precedent check: skipping only removes
+# candidates, and a version that would move the Catalog backwards is still
+# refused by Scripts/check-catalog-precedent.sh when it is published.
+#
+# Example (commented out, nothing is skipped today):
+# 0.2.0-rc.3 | 2027-01-31 | upstream dependency graph cannot boot today (see docs/historical-versions.md)

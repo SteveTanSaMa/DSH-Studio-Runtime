@@ -526,6 +526,137 @@ for (const index of [0, 1]) {
 }
 ' "$WORK_DIR/v1/catalog.json" "$WORK_DIR/repack/catalog.json"
 
+echo "cron version selection"
+# Fixed inputs only: the selector never touches the network, so these tests do
+# not depend on the live npm registry or on GitHub state.
+SELECT="$SCRIPT_DIR/select-next-runtime-version.sh"
+SEL="$WORK_DIR/selection"
+mkdir -p "$SEL"
+# Upstream releases in the order the workflow emits them (ascending by
+# published_at), including prereleases, plus a version below the floor.
+cat > "$SEL/releases.tsv" <<'TSV'
+dsh-v0.1.7-rc.1	2026-09-23T13:30:24Z
+dsh-v0.1.7-rc.2	2026-09-24T14:10:21Z
+dsh-v0.2.0-rc.1	2026-09-28T12:36:21Z
+dsh-v0.2.0-rc.2	2026-09-29T09:42:36Z
+dsh-v0.2.1-alpha.1	2026-10-03T06:42:19Z
+dsh-v0.2.1-alpha.2	2026-10-09T16:18:02Z
+TSV
+printf 'runtime-0.1.7-rc.2\nruntime-0.2.0-rc.1\n' > "$SEL/published.txt"
+: > "$SEL/skips-empty.txt"
+cat > "$SEL/skips-one.txt" <<'SKIPS'
+# version | until | reason
+0.2.0-rc.2 | 2027-01-31 | upstream dependency graph cannot boot (fixture)
+SKIPS
+cat > "$SEL/skips-consecutive.txt" <<'SKIPS'
+0.2.0-rc.2 | 2027-01-31 | cannot boot (fixture)
+0.2.1-alpha.1 | 2027-03-31 | npm package is broken (fixture)
+SKIPS
+cat > "$SEL/skips-expired.txt" <<'SKIPS'
+0.2.0-rc.2 | 2026-01-01 | expired window (fixture)
+SKIPS
+cat > "$SEL/skips-all.txt" <<'SKIPS'
+0.2.0-rc.2 | 2027-01-31 | cannot boot (fixture)
+0.2.1-alpha.1 | 2027-03-31 | broken (fixture)
+0.2.1-alpha.2 | 2027-06-30 | broken (fixture)
+SKIPS
+printf '0.2.0-rc.2 |  | missing the until date\n' > "$SEL/skips-no-date.txt"
+printf '0.2.0-rc.2 | 2027-13-45 | impossible date\n' > "$SEL/skips-bad-date.txt"
+printf '0.2.0-rc.2 | 2027-01-31 |\n' > "$SEL/skips-no-reason.txt"
+printf 'not-a-version | 2027-01-31 | bad version\n' > "$SEL/skips-bad-version.txt"
+
+# Runs the selector and compares stdout verbatim with the expected lines.
+expect_selection() {
+    local name="$1" expected="$2"
+    shift 2
+    if "$SELECT" "$@" >"$SEL/stdout.txt" 2>"$SEL/stderr.txt"; then
+        if [ "$(cat "$SEL/stdout.txt")" = "$expected" ]; then
+            pass "$name"
+        else
+            printf '  FAIL  %s (selected: %s)\n' "$name" "$(tr '\n' ' ' < "$SEL/stdout.txt")" >&2
+            fail_test "$name (unexpected selection)"
+        fi
+    else
+        fail_test "$name (selector exited non-zero)"
+    fi
+}
+
+# Runs the selector and expects success with the given text in stderr.
+expect_selection_stderr() {
+    local name="$1" pattern="$2"
+    shift 2
+    if "$SELECT" "$@" >/dev/null 2>"$SEL/stderr.txt" && grep -q "$pattern" "$SEL/stderr.txt"; then
+        pass "$name"
+    else
+        fail_test "$name (expected stderr matching: $pattern)"
+    fi
+}
+
+# Runs the selector and expects a fail-closed refusal with the given text.
+expect_selection_refusal() {
+    local name="$1" pattern="$2"
+    shift 2
+    if "$SELECT" "$@" >"$SEL/stdout.txt" 2>"$SEL/stderr.txt"; then
+        fail_test "$name (expected a non-zero exit)"
+    elif grep -q "$pattern" "$SEL/stderr.txt"; then
+        if [ -s "$SEL/stdout.txt" ]; then
+            fail_test "$name (refused but still printed candidates)"
+        else
+            pass "$name"
+        fi
+    else
+        fail_test "$name (expected stderr matching: $pattern)"
+    fi
+}
+
+FIXED_ARGS=(--releases "$SEL/releases.tsv" --published "$SEL/published.txt" --floor 0.1.7-rc.2 --today 2026-10-11)
+
+expect_selection "selects the oldest unpublished version above the floor, in order" \
+    "$(printf '0.2.0-rc.2\n0.2.1-alpha.1\n0.2.1-alpha.2')" "${FIXED_ARGS[@]}"
+expect_selection "skips a listed version and keeps the rest in order" \
+    "$(printf '0.2.1-alpha.1\n0.2.1-alpha.2')" "${FIXED_ARGS[@]}" --skips "$SEL/skips-one.txt"
+expect_selection_stderr "reports why the version was skipped" \
+    "skipping 0.2.0-rc.2 until 2027-01-31 — upstream dependency graph cannot boot" \
+    "${FIXED_ARGS[@]}" --skips "$SEL/skips-one.txt"
+expect_selection "skips several consecutive versions" \
+    "0.2.1-alpha.2" "${FIXED_ARGS[@]}" --skips "$SEL/skips-consecutive.txt"
+expect_selection "puts an expired skip back at the head of the candidate list" \
+    "$(printf '0.2.0-rc.2\n0.2.1-alpha.1\n0.2.1-alpha.2')" "${FIXED_ARGS[@]}" --skips "$SEL/skips-expired.txt"
+expect_selection_stderr "says that the skip expired and the version is retried" \
+    "the skip recorded for 0.2.0-rc.2 expired on 2026-01-01" \
+    "${FIXED_ARGS[@]}" --skips "$SEL/skips-expired.txt"
+expect_selection_stderr "says how many versions stay queued behind the first candidate" \
+    "the other 2 stay queued behind it" "${FIXED_ARGS[@]}"
+expect_selection "selects nothing when every candidate is skipped" \
+    "" "${FIXED_ARGS[@]}" --skips "$SEL/skips-all.txt"
+expect_selection_stderr "says out loud that everything is skip-listed" \
+    "every candidate is skip-listed" "${FIXED_ARGS[@]}" --skips "$SEL/skips-all.txt"
+expect_selection "never re-emits a version that already has a release" \
+    "$(printf '0.2.0-rc.2\n0.2.1-alpha.1\n0.2.1-alpha.2')" "${FIXED_ARGS[@]}"
+expect_selection_stderr "explains that an existing release was skipped" \
+    "runtime-0.2.0-rc.1 already exists; skipping" "${FIXED_ARGS[@]}"
+expect_selection "selects nothing when the floor is not in the upstream list" \
+    "" --releases "$SEL/releases.tsv" --published "$SEL/published.txt" --floor 0.9.9 --today 2026-10-11
+expect_selection_stderr "warns instead of guessing when the floor is missing" \
+    "is not in the upstream release list" \
+    --releases "$SEL/releases.tsv" --published "$SEL/published.txt" --floor 0.9.9 --today 2026-10-11
+expect_selection_refusal "fails closed when a skip record has no until date" \
+    "missing the mandatory until date" "${FIXED_ARGS[@]}" --skips "$SEL/skips-no-date.txt"
+expect_selection_refusal "fails closed when a skip record has no reason" \
+    "missing a reason" "${FIXED_ARGS[@]}" --skips "$SEL/skips-no-reason.txt"
+expect_selection_refusal "fails closed on an impossible date" \
+    "until must be YYYY-MM-DD" "${FIXED_ARGS[@]}" --skips "$SEL/skips-bad-date.txt"
+expect_selection_refusal "fails closed on a version that is not an upstream version" \
+    "not an upstream version" "${FIXED_ARGS[@]}" --skips "$SEL/skips-bad-version.txt"
+expect_selection_refusal "fails closed on a malformed upstream release list" \
+    "unexpected upstream tag" --releases "$SEL/skips-one.txt" --published "$SEL/published.txt" \
+    --floor 0.1.7-rc.2 --today 2026-10-11
+# A skip list only removes candidates; it cannot move the Catalog backwards,
+# because that decision stays in the precedent guard.
+expect_failure_matching "an older version selected as a candidate is still refused by the precedent guard" \
+    "refusing to publish" \
+    "$SCRIPT_DIR/check-catalog-precedent.sh" "$WORK_DIR/v1/catalog.json" "$WORK_DIR/rc1/catalog.json"
+
 echo "dependency audit"
 mkdir -p "$WORK_DIR/audit"
 cat > "$WORK_DIR/audit/allowlisted.json" <<'JSON'
