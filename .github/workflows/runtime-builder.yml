@@ -65,6 +65,11 @@ jobs:
       allow_catalog_downgrade: ${{ steps.resolve.outputs.allow_catalog_downgrade }}
       plugin_market_version: ${{ steps.resolve.outputs.plugin_market_version }}
     steps:
+      # The resolve step reads Scripts/select-next-runtime-version.sh and the skip
+      # list, so the repository has to be on the runner. The first scheduled run
+      # after the skip-list change failed with "No such file or directory" because
+      # this job never checked it out.
+      - uses: actions/checkout@v4
       - name: Resolve Runtime version
         id: resolve
         env:
@@ -130,32 +135,33 @@ jobs:
                 # Selection is a separate, offline-tested script: it applies the
                 # floor, drops versions that already have a release, and applies
                 # the recorded skip list. The npm check stays here because it is
-                # the only network call.
-                selection_failed=false
+                # the only network call. A selection failure fails the step: the
+                # first run of this path failed to find the script and, because a
+                # failure used to look like "nothing to build", the run stayed
+                # green while nothing could ever be published again.
                 "$GITHUB_WORKSPACE/Scripts/select-next-runtime-version.sh" \
                   --releases "$selection_dir/upstream-releases.tsv" \
                   --published "$selection_dir/published-tags.txt" \
                   --floor "$UPSTREAM_MIN_HARNESS_VERSION" \
                   --skips "$GITHUB_WORKSPACE/Scripts/skipped-runtime-versions.txt" \
-                  > "$selection_dir/candidates.txt" || selection_failed=true
-                if [ "$selection_failed" = true ]; then
-                  echo "::error::Version selection failed (malformed input or skip list); building nothing rather than guessing."
-                else
-                  while IFS= read -r harness_version || [ -n "$harness_version" ]; do
-                    [ -n "$harness_version" ] || continue
-                    runtime_tag="runtime-${harness_version}"
-                    # One Harness version is one Runtime: a version whose npm
-                    # package is missing is skipped explicitly, never replaced by
-                    # an older candidate.
-                    if ! npm view "@deepseek-ai/dsh@$harness_version" version --registry "https://registry.npmjs.org" >/dev/null 2>&1; then
-                      echo "::warning::Skipping Harness release $harness_version because @deepseek-ai/dsh@$harness_version is not published on npm."
-                      continue
-                    fi
-                    runtime_version="$harness_version"
-                    echo "New official Harness release $harness_version; building $runtime_tag."
-                    break
-                  done < "$selection_dir/candidates.txt"
-                fi
+                  > "$selection_dir/candidates.txt" || {
+                    echo "::error::Version selection failed; nothing was built. Fix the selection input or script before the next run."
+                    exit 1
+                  }
+                while IFS= read -r harness_version || [ -n "$harness_version" ]; do
+                  [ -n "$harness_version" ] || continue
+                  runtime_tag="runtime-${harness_version}"
+                  # One Harness version is one Runtime: a version whose npm
+                  # package is missing is skipped explicitly, never replaced by
+                  # an older candidate.
+                  if ! npm view "@deepseek-ai/dsh@$harness_version" version --registry "https://registry.npmjs.org" >/dev/null 2>&1; then
+                    echo "::warning::Skipping Harness release $harness_version because @deepseek-ai/dsh@$harness_version is not published on npm."
+                    continue
+                  fi
+                  runtime_version="$harness_version"
+                  echo "New official Harness release $harness_version; building $runtime_tag."
+                  break
+                done < "$selection_dir/candidates.txt"
                 if [ -z "$runtime_version" ]; then
                   echo "No unbuilt official Harness release with a published npm package was found."
                   should_build=false

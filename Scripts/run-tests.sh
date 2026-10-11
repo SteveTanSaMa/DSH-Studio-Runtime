@@ -873,6 +873,51 @@ assert.ok(keyID, "keyID is missing");
 assert.strictEqual(Buffer.from(publicKey, "base64").length, 32, "publicKey must be 32 bytes of base64");
 ' "$REPOSITORY_ROOT/keys/runtime-catalog-public.txt"
 
+echo "workflow wiring"
+# The first real scheduled run after the skip-list change failed because the
+# prepare job never checked the repository out, so a path the workflow referenced
+# did not exist on the runner. These two checks close that class of gap offline.
+WORKFLOW="$REPOSITORY_ROOT/.github/workflows/runtime-builder.yml"
+
+missing_paths="$(
+    {
+        grep -oE '\$\{?GITHUB_WORKSPACE\}?/[A-Za-z0-9._/-]*' "$WORKFLOW" |
+            sed -E 's|^\$\{?GITHUB_WORKSPACE\}?/||' | sort -u |
+            while IFS= read -r referenced; do
+                [ -n "$referenced" ] || continue
+                [ -e "$REPOSITORY_ROOT/$referenced" ] || printf '%s\n' "$referenced"
+            done
+    } || true
+)"
+if [ -z "$missing_paths" ]; then
+    pass "every repository path the workflow references exists"
+else
+    printf '%s\n' "$missing_paths" > "$WORK_DIR/output.log"
+    fail_test "the workflow references repository paths that do not exist"
+fi
+
+jobs_without_checkout="$(
+    awk '
+        /^jobs:[[:space:]]*$/ { inside = 1; next }
+        !inside { next }
+        /^[[:space:]]*#/ { next }
+        /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { job = $1; sub(":", "", job); next }
+        { if (job != "") body[job] = body[job] "\n" $0 }
+        END {
+            for (name in body) {
+                if (body[name] ~ /GITHUB_WORKSPACE/ && body[name] !~ /actions\/checkout/) print name
+            }
+        }
+    ' "$WORKFLOW" | sort
+)"
+if [ -z "$jobs_without_checkout" ]; then
+    pass "every job that reads repository files checks the repository out"
+else
+    printf 'jobs referencing ${GITHUB_WORKSPACE} without actions/checkout:\n%s\n' "$jobs_without_checkout" \
+        > "$WORK_DIR/output.log"
+    fail_test "a job reads repository files without checking them out"
+fi
+
 echo "syntax checks"
 for script in "$SCRIPT_DIR"/*.sh "$SCRIPT_DIR"/lib/*.sh "$SCRIPT_DIR"/tests/*.sh; do
     expect_success "bash -n ${script#"$SCRIPT_DIR"/}" bash -n "$script"
