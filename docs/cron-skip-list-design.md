@@ -147,8 +147,12 @@ done
 
 以下为已接受的边界，不要求继续扩展功能：
 
-1. **新的 schedule 选择逻辑尚未在真实 GitHub Actions 定时任务中执行过**（脚本本身已用线上数据离线演练，
-   但"在 runner 上按 workflow 接线实际执行"仍是未验证项）。
+1. ~~**新的 schedule 选择逻辑尚未在真实 GitHub Actions 定时任务中执行过**~~ → **已于 2026-10-12 验证**：
+   修复接线缺陷（`7451b68`，加 `actions/checkout` + 选择失败即失败）之后的三次 schedule run
+   （`2026-10-11T20:20:31Z`、`2026-10-12T00:35:39Z`、`2026-10-12T07:25:11Z`，最新 run id `38217623761`）
+   均在 prepare 日志中输出了选择器的 `##[notice]selection: …` 序列，并以
+   `no candidate above 0.1.7-rc.2 is both unpublished and unskipped; nothing to build` +
+   `should_build=false` 结束：build/publish/verify 全部 skipped，未触发任何发布。
 2. **跳过列表尚未经历真实失败版本**：机制经过 fixture 验证，但没有一个真实版本因为它而被跳过。
 3. **日期校验只做范围校验**（月 01-12、日 01-31），不覆盖日历上不存在的日期（如 `2027-02-31`）。
 4. **仍需人工登记**：只有把持续失败的版本写进跳过列表，后续版本才会继续推进；没有自动检测。
