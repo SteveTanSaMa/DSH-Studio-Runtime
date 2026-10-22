@@ -584,7 +584,7 @@ jobs:
           const api = (route) => JSON.parse(gh("api", `repos/${repository}/${route}`));
           const directory = fs.mkdtempSync(path.join(os.tmpdir(), "runtime-tag-sources-"));
           try {
-            const releases = JSON.parse(gh("api", `repos/${repository}/releases?per_page=100`, "--paginate", "--slurp")).flat();
+            const releases = JSON.parse(gh("api", `repos/${repository}/releases?per_page=100&page=1`, "--paginate", "--slurp")).flat();
             const targets = new Map();
             const key = fs.readFileSync("keys/runtime-catalog-public.txt", "utf8").match(/^publicKey=(.+)$/m)[1];
             for (const release of releases.filter((item) => !item.draft && /^runtime-\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(item.tag_name))) {
