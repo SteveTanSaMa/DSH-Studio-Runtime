@@ -27,19 +27,21 @@ function fixture() {
   return directory;
 }
 
-test("Chinese precedes English, and both describe both current architectures and signed catalogs", () => {
+test("shared bilingual tables retain current downloads, checksums and build links without duplicated sections", () => {
   const notes = generateNotes(fixture(), "0.2.1-rc.2", "owner/runtime");
-  const [chinese, english] = notes.split("\n\n---\n\n");
-  assert.match(chinese, /^DSH Studio 运行时安装包/);
-  assert.match(english, /^DSH Studio Runtime artifact/);
-  for (const section of [chinese, english]) {
-    for (const expected of ["darwin-arm64", "darwin-x64", "26.12.1", "current-commit",
-      "darwin-arm64-lock", "darwin-x64-lock", "a".repeat(64), "b".repeat(64),
-      "owner/runtime/releases/download/runtime-0.2.1-rc.2/runtime-catalog.signed.json",
-      "owner/runtime/releases/download/runtime-catalog/runtime-catalog.signed.json"]) {
-      assert.ok(section.includes(expected), expected);
-    }
+  assert.match(notes, /组件 \/ Component/);
+  assert.match(notes, /架构 \/ Architecture/);
+  for (const expected of ["26.12.1", "a".repeat(64), "b".repeat(64)]) {
+    assert.equal(notes.split(expected).length - 1, 1, expected);
   }
+  for (const expected of [
+    "owner/runtime/releases/download/runtime-0.2.1-rc.2/darwin-arm64.tar.gz",
+    "owner/runtime/releases/download/runtime-0.2.1-rc.2/darwin-x64.tar.gz",
+    "owner/runtime/releases/download/runtime-0.2.1-rc.2/runtime-catalog.signed.json",
+    "owner/runtime/releases/download/runtime-catalog/runtime-catalog.signed.json",
+    "owner/runtime/commit/current-commit", "owner/runtime/actions/runs/42"
+  ]) assert.ok(notes.includes(expected), expected);
+  assert.equal(notes.includes("\n\n---\n\n"), false);
 });
 
 test("missing or duplicate architectures cannot produce release notes", () => {

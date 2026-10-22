@@ -445,7 +445,7 @@ jobs:
           # One Harness version is one current Runtime, so the release carries the
           # Harness version and nothing else. A repack replaces the artifacts of
           # this release and lands in the notes, not in the name.
-          release_title="运行时 / Runtime ${runtime_version}"
+          release_title="Runtime ${runtime_version}"
           notes_file="$RUNNER_TEMP/runtime-release-notes.md"
           node ./Scripts/generate-runtime-release-notes.js \
             "$notes_file" RuntimeArtifacts "$runtime_version"
@@ -483,19 +483,17 @@ jobs:
           if [ "$PUBLISH_CATALOG_INPUT" = "true" ]; then
             catalog_notes="$RUNNER_TEMP/runtime-catalog-notes.md"
             cat > "$catalog_notes" <<'NOTES'
-          DSH Studio 自动发现运行时使用的签名目录。
-
-          Signed Runtime catalog for DSH Studio automatic discovery.
+          DSH Studio 用此签名索引查找最新 Runtime。 / Signed index for discovering the latest DSH Studio Runtime.
           NOTES
             if ! gh release view runtime-catalog --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
               gh release create runtime-catalog \
                 --repo "$GITHUB_REPOSITORY" \
-                --title "运行时目录 / Runtime catalog" \
+                --title "Runtime catalog" \
                 --notes-file "$catalog_notes"
             else
               gh release edit runtime-catalog \
                 --repo "$GITHUB_REPOSITORY" \
-                --title "运行时目录 / Runtime catalog" \
+                --title "Runtime catalog" \
                 --notes-file "$catalog_notes"
             fi
             upload_asset runtime-catalog RuntimeArtifacts/runtime-catalog.signed.json catalog

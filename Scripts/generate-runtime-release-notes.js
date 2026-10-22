@@ -25,40 +25,31 @@ function generateNotes(directory, runtimeVersion, repository) {
   const first = metadata[0];
   const provenance = first.provenance || {};
   const code = (value) => "`" + String(value).replace(/[\r\n]/g, " ").replace(/\|/g, "\\|").replace(/`/g, "\\`") + "`";
-  const section = (chinese) => {
-    const lines = [
-      chinese ? "DSH Studio 运行时安装包。" : "DSH Studio Runtime artifact.",
-      "",
-      chinese ? "| 项目 | 内容 |" : "| Item | Value |",
-      "| --- | --- |",
-      `| Harness | ${code(first.harnessVersion)} |`,
-      `| ${chinese ? "平台" : "Platform"} | ${code(first.platform || "macos")} |`,
-      `| Node | ${code(first.nodeVersion)} |`,
-      `| pnpm | ${code(first.pnpmVersion)} |`,
-      `| ${chinese ? "数据格式" : "Data format"} | ${code(first.dataFormat.id)} |`
-    ];
-    if (provenance.commit || provenance.runId) {
-      lines.push(`| ${chinese ? "构建来源" : "Built from"} | ${code(provenance.commit || "unknown")} (${code(provenance.ref || "unknown")}), ${chinese ? "运行编号" : "run"} ${code(provenance.runId || "unknown")} |`);
-    }
-    lines.push("", chinese
-      ? `Runtime 版本与 Harness 版本 ${code(runtimeVersion)} 相同。重新打包会替换同一版本的安装包，客户端以签名目录中的 SHA-256 校验下载内容。`
-      : `The Runtime version is the Harness version ${code(runtimeVersion)}. Repacking replaces the artifacts in place; clients verify the downloaded bytes against the signed catalog's SHA-256.`,
-      "", chinese ? "| 架构 | 安装包 | SHA-256 | 大小 |" : "| Architecture | Artifact | SHA-256 | Size |",
-      "| --- | --- | --- | --- |");
-    for (const item of metadata) {
-      lines.push(`| ${code(item.architecture)} | ${code(item.artifact)} | ${code(item.sha256)} | ${item.size} ${chinese ? "字节" : "bytes"} |`);
-    }
-    lines.push("", chinese ? "各架构的依赖锁文件摘要：" : "Dependency lock digests by architecture:", "");
-    for (const item of metadata) {
-      lines.push(`- ${code(item.architecture)}: ${code(item.dependencyLockSHA256 || "unknown")}`);
-    }
-    lines.push("", chinese ? "本版本的签名运行时目录：" : "Signed catalog for this Runtime release:",
-      `https://github.com/${repository}/releases/download/runtime-${runtimeVersion}/runtime-catalog.signed.json`,
-      "", chinese ? "DSH Studio 自动发现最新版使用的签名目录：" : "Signed catalog used by DSH Studio to discover the latest Runtime:",
-      `https://github.com/${repository}/releases/download/runtime-catalog/runtime-catalog.signed.json`);
-    return lines.join("\n");
-  };
-  return section(true) + "\n\n---\n\n" + section(false) + "\n";
+  const releaseURL = `https://github.com/${repository}/releases/download/runtime-${runtimeVersion}`;
+  const lines = [
+    "供 DSH Studio 使用的 macOS 运行环境。 / macOS runtime for DSH Studio.",
+    "",
+    "| 组件 / Component | 版本 / Version |",
+    "| --- | --- |",
+    `| Harness | ${code(first.harnessVersion)} |`,
+    `| Node.js | ${code(first.nodeVersion)} |`,
+    `| pnpm | ${code(first.pnpmVersion)} |`,
+    `| 数据格式 / Data format | ${code(first.dataFormat.id)} |`,
+    "",
+    "| 架构 / Architecture | 下载 / Download | SHA-256 | 大小 / Size |",
+    "| --- | --- | --- | --- |"
+  ];
+  for (const item of metadata) {
+    lines.push(`| ${code(item.architecture)} | [tar.gz](${releaseURL}/${encodeURIComponent(item.artifact)}) | ${code(item.sha256)} | ${(item.size / 1024 / 1024).toFixed(1)} MiB |`);
+  }
+  lines.push("",
+    `[本版签名索引 / Release catalog](${releaseURL}/runtime-catalog.signed.json) · ` +
+    `[最新版索引 / Latest catalog](https://github.com/${repository}/releases/download/runtime-catalog/runtime-catalog.signed.json)`);
+  const source = [];
+  if (provenance.commit) source.push(`[${String(provenance.commit).slice(0, 7)}](https://github.com/${repository}/commit/${encodeURIComponent(provenance.commit)})`);
+  if (provenance.runId) source.push(`[Actions #${provenance.runId}](https://github.com/${repository}/actions/runs/${encodeURIComponent(provenance.runId)})`);
+  if (source.length) lines.push("", `构建来源 / Build: ${source.join(" · ")}`);
+  return lines.join("\n") + "\n";
 }
 
 module.exports = { generateNotes };

@@ -344,7 +344,7 @@ Runtime 不再单独解析、安装或检测第三方 `dshmarket`，新产物的
 均不再输出旧 `pluginMarket` 字段。旧 App 在字段缺失时仍可能使用其内置 pin；停止自动托管旧市场
 还需要使用已完成迁移的 App。
 
-Release 标题和说明均中文在前、英文在后，由 `Scripts/generate-runtime-release-notes.js` 统一生成；替换已有 Release 时也会更新说明。每个版本额外发布自己的 `runtime-catalog.signed.json`。历史版本重新打包时，将 workflow dispatch 的 `publish_catalog` 设为 `false`，只替换该版本并验证其签名目录，不降低自动发现目录的版本；最新版验证完成后再更新自动发现目录。
+Release 标题采用 `Runtime <版本号>`，说明使用精简的中英双语表格，由 `Scripts/generate-runtime-release-notes.js` 统一生成；替换已有 Release 时也会更新说明。每个版本额外发布自己的 `runtime-catalog.signed.json`。历史版本重新打包时，将 workflow dispatch 的 `publish_catalog` 设为 `false`，只替换该版本并验证其签名目录，不降低自动发现目录的版本；最新版验证完成后再更新自动发现目录。
 
 `sync_release_tags=true` 用于在全部历史版本验证通过后同步源码标签。GitHub 内置令牌可能以 403 拒绝指向含工作流变更的较早提交；此时使用维护者凭据，将标签同步到已验证的 `provenance.commit`，再仅重跑失败的标签同步步骤，无需重新打包。
 
