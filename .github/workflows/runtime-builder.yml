@@ -23,6 +23,11 @@ on:
         description: "Explicit migration identifier, or leave blank"
         required: false
         type: string
+      sync_release_tags:
+        description: "同步已验证版本的源码标签 / Sync source tags after all historical repacks are verified"
+        required: false
+        type: boolean
+        default: false
       publish_catalog:
         description: "更新自动发现目录 / Update the latest discovery catalog (disable for historical repacks)"
         required: false
@@ -554,3 +559,70 @@ jobs:
             catalog_url="https://github.com/$GITHUB_REPOSITORY/releases/download/runtime-catalog/runtime-catalog.signed.json"
           fi
           ./Scripts/verify-published-runtime.sh "$RUNTIME_VERSION_INPUT" "$public_key" "$catalog_url"
+
+  sync-release-tags:
+    if: github.event_name == 'workflow_dispatch' && inputs.sync_release_tags
+    needs: verify-published
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Point release tags at their verified build sources
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("node:fs");
+          const os = require("node:os");
+          const path = require("node:path");
+          const { execFileSync } = require("node:child_process");
+          const repository = process.env.GITHUB_REPOSITORY;
+          const gh = (...args) => execFileSync("gh", args, { encoding: "utf8" });
+          const api = (route) => JSON.parse(gh("api", `repos/${repository}/${route}`));
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "runtime-tag-sources-"));
+          try {
+            const releases = JSON.parse(gh("api", `repos/${repository}/releases?per_page=100`, "--paginate", "--slurp")).flat();
+            const targets = new Map();
+            const key = fs.readFileSync("keys/runtime-catalog-public.txt", "utf8").match(/^publicKey=(.+)$/m)[1];
+            for (const release of releases.filter((item) => !item.draft && /^runtime-\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(item.tag_name))) {
+              const target = path.join(directory, release.tag_name);
+              fs.mkdirSync(target);
+              gh("release", "download", release.tag_name, "--repo", repository, "--pattern", "artifact-*.json", "--pattern", "runtime-catalog.signed.json", "--dir", target);
+              const payloadPath = path.join(target, "payload.json");
+              execFileSync("bash", ["Scripts/verify-runtime-catalog.sh", path.join(target, "runtime-catalog.signed.json"), key, payloadPath]);
+              const payload = JSON.parse(fs.readFileSync(payloadPath));
+              const metadata = fs.readdirSync(target).filter((name) => name.startsWith("artifact-")).map((name) => JSON.parse(fs.readFileSync(path.join(target, name))));
+              const commit = metadata[0]?.provenance?.commit;
+              if (metadata.length !== 2 || !/^[0-9a-f]{40}$/.test(commit || "") ||
+                  metadata.some((item) => item.provenance?.commit !== commit || item.nodeVersion !== "26.12.1" || "pluginMarket" in item) ||
+                  payload.runtimeVersion !== release.tag_name.slice(8) || payload.releases.length !== 2 ||
+                  payload.releases.some((item) => item.nodeVersion !== "26.12.1" || "pluginMarket" in item ||
+                    !metadata.some((entry) => entry.architecture === item.architecture && entry.sha256 === item.artifact.sha256))) {
+                throw new Error(`release is not a verified replacement: ${release.tag_name}`);
+              }
+              api(`git/commits/${commit}`);
+              targets.set(release.tag_name, commit);
+            }
+            gh("release", "download", "runtime-catalog", "--repo", repository, "--pattern", "runtime-catalog.signed.json", "--dir", directory);
+            const currentPath = path.join(directory, "current.json");
+            execFileSync("bash", ["Scripts/verify-runtime-catalog.sh", path.join(directory, "runtime-catalog.signed.json"), key, currentPath]);
+            const current = JSON.parse(fs.readFileSync(currentPath));
+            const latestCommit = targets.get(`runtime-${current.runtimeVersion}`);
+            if (!latestCommit) throw new Error("discovery catalog has no verified Runtime source");
+            targets.set("runtime-catalog", latestCommit);
+            // Validate every source before moving any tag. GITHUB_TOKEN writes
+            // do not recursively trigger the tag-push build workflow.
+            for (const [tag, commit] of targets) {
+              const reference = api(`git/ref/tags/${tag}`);
+              if (reference.object.sha !== commit) {
+                gh("api", "--method", "PATCH", `repos/${repository}/git/refs/tags/${tag}`, "-f", `sha=${commit}`, "-F", "force=true");
+              }
+              console.log(`Verified source tag: ${tag} -> ${commit}`);
+            }
+          } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+          }
+          NODE
