@@ -29,7 +29,7 @@ jobs:
         with:
           # Same major line as the Runtime bundles, so the tooling is exercised
           # against a Node version the distribution actually ships.
-          node-version: "24.19.0"
+          node-version: "26.12.1"
 
       - name: Run the offline test suite
         run: ./Scripts/run-tests.sh

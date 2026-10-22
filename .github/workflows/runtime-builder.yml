@@ -11,10 +11,6 @@ on:
         description: "Exact pnpm version to package"
         required: false
         type: string
-      plugin_market_version:
-        description: "Optional exact dshmarket version; 'none' publishes no market pin; empty resolves the newest compatible"
-        required: false
-        type: string
       runtime_data_format_id:
         description: "Harness data format ID, for example sqlite-v2"
         required: false
@@ -63,7 +59,6 @@ jobs:
       runtime_data_format_compatible_with: ${{ steps.resolve.outputs.runtime_data_format_compatible_with }}
       runtime_data_format_migration: ${{ steps.resolve.outputs.runtime_data_format_migration }}
       allow_catalog_downgrade: ${{ steps.resolve.outputs.allow_catalog_downgrade }}
-      plugin_market_version: ${{ steps.resolve.outputs.plugin_market_version }}
     steps:
       # The resolve step reads Scripts/select-next-runtime-version.sh and the skip
       # list, so the repository has to be on the runner. The first scheduled run
@@ -78,13 +73,11 @@ jobs:
           EVENT_REF_NAME: ${{ github.ref_name }}
           DISPATCH_RUNTIME_VERSION: ${{ inputs.runtime_version }}
           DISPATCH_PNPM_VERSION: ${{ inputs.pnpm_version }}
-          DISPATCH_PLUGIN_MARKET_VERSION: ${{ inputs.plugin_market_version }}
           DISPATCH_DATA_FORMAT_ID: ${{ inputs.runtime_data_format_id }}
           DISPATCH_DATA_FORMAT_COMPATIBLE_WITH: ${{ inputs.runtime_data_format_compatible_with }}
           DISPATCH_DATA_FORMAT_MIGRATION: ${{ inputs.runtime_data_format_migration }}
           DISPATCH_ALLOW_CATALOG_DOWNGRADE: ${{ inputs.allow_catalog_downgrade }}
           DEFAULT_PNPM_VERSION: ${{ vars.RUNTIME_PNPM_VERSION }}
-          DEFAULT_PLUGIN_MARKET_VERSION: ${{ vars.RUNTIME_PLUGIN_MARKET_VERSION }}
           DEFAULT_DATA_FORMAT_ID: ${{ vars.RUNTIME_DATA_FORMAT_ID }}
           DEFAULT_DATA_FORMAT_COMPATIBLE_WITH: ${{ vars.RUNTIME_DATA_FORMAT_COMPATIBLE_WITH }}
           DEFAULT_DATA_FORMAT_MIGRATION: ${{ vars.RUNTIME_DATA_FORMAT_MIGRATION }}
@@ -103,7 +96,6 @@ jobs:
           allow_catalog_downgrade=false
           runtime_version="$DISPATCH_RUNTIME_VERSION"
           pnpm_version="${DISPATCH_PNPM_VERSION:-$DEFAULT_PNPM_VERSION}"
-          plugin_market_version="${DISPATCH_PLUGIN_MARKET_VERSION:-$DEFAULT_PLUGIN_MARKET_VERSION}"
           data_format_id="${DISPATCH_DATA_FORMAT_ID:-$DEFAULT_DATA_FORMAT_ID}"
           data_format_compatible_with="${DISPATCH_DATA_FORMAT_COMPATIBLE_WITH:-$DEFAULT_DATA_FORMAT_COMPATIBLE_WITH}"
           data_format_migration="${DISPATCH_DATA_FORMAT_MIGRATION:-$DEFAULT_DATA_FORMAT_MIGRATION}"
@@ -195,7 +187,6 @@ jobs:
             esac
           }
           validate_token "pnpm_version" "$pnpm_version"
-          validate_token "plugin_market_version" "$plugin_market_version"
           validate_token "runtime_data_format_id" "$data_format_id"
           validate_token "runtime_data_format_compatible_with" "$data_format_compatible_with"
           validate_token "runtime_data_format_migration" "$data_format_migration"
@@ -249,7 +240,6 @@ jobs:
             echo "runtime_data_format_compatible_with=$data_format_compatible_with"
             echo "runtime_data_format_migration=$data_format_migration"
             echo "allow_catalog_downgrade=$allow_catalog_downgrade"
-            echo "plugin_market_version=$plugin_market_version"
           } >> "$GITHUB_OUTPUT"
 
   build:
@@ -279,7 +269,6 @@ jobs:
           RUNTIME_DATA_FORMAT_MIGRATION: ${{ needs.prepare.outputs.runtime_data_format_migration }}
           RUNTIME_HARNESS_VERSION: ${{ needs.prepare.outputs.runtime_version }}
           RUNTIME_PNPM_VERSION: ${{ needs.prepare.outputs.pnpm_version }}
-          PLUGIN_MARKET_VERSION_INPUT: ${{ needs.prepare.outputs.plugin_market_version }}
           RUNTIME_VERSION_INPUT: ${{ needs.prepare.outputs.runtime_version }}
           RUNTIME_ARTIFACT_BASE_URL: https://github.com/${{ github.repository }}/releases/download/runtime-${{ needs.prepare.outputs.runtime_version }}
           BUILD_SOURCE_COMMIT: ${{ github.sha }}
@@ -291,7 +280,6 @@ jobs:
           ARCHITECTURE="${{ matrix.architecture }}" \
           HARNESS_VERSION="$RUNTIME_HARNESS_VERSION" \
           PNPM_VERSION="$RUNTIME_PNPM_VERSION" \
-          PLUGIN_MARKET_VERSION="$PLUGIN_MARKET_VERSION_INPUT" \
           DSH_RUNTIME_DATA_FORMAT_ID="$RUNTIME_DATA_FORMAT_ID" \
           DSH_RUNTIME_DATA_FORMAT_COMPATIBLE_WITH="${RUNTIME_DATA_FORMAT_COMPATIBLE_WITH:-}" \
           DSH_RUNTIME_DATA_FORMAT_MIGRATION="${RUNTIME_DATA_FORMAT_MIGRATION:-}" \
@@ -466,9 +454,6 @@ jobs:
             `| Node | \`${first.nodeVersion}\` |`,
             `| pnpm | \`${first.pnpmVersion}\` |`,
             `| Data format | \`${first.dataFormat.id}\` |`,
-            `| Plugin market | ${first.pluginMarket
-              ? `\`${first.pluginMarket.package}@${first.pluginMarket.version}\``
-              : "_not pinned; DSH Studio falls back to its compiled pin_"} |`,
             `| Dependency lock | \`${first.dependencyLockSHA256 || "unknown"}\` |`
           ];
           if (provenance.commit || provenance.runId) {

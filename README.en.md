@@ -142,11 +142,11 @@ harness/<architecture>/<harnessVersion>/...
 
 `schemaVersion`, `runtimeVersion`, `platform`, `architecture`, `nodeVersion`, `harnessVersion`,
 `pnpmVersion`, `nodeSHA256`, `harnessPackageIntegrity`, `pnpmPackageIntegrity`, `registry`,
-`dependencyLockSHA256`, `pluginMarket`, `dataFormat`, `provenance`.
+`dependencyLockSHA256`, `dataFormat`, `provenance`.
 
 The client compares these fields, one by one, against the matching entry in the signed catalog.
 Adding fields is compatible (unknown fields are ignored); changing or removing the meaning of an
-existing field is not. The artifact's own `sha256`/`size` are deliberately absent from the archive —
+existing required field is not. The artifact's own `sha256`/`size` are deliberately absent from the archive —
 the manifest is part of the archive, so recording its own digest there would be circular; they are
 carried by the metadata and the signed catalog instead.
 
@@ -154,7 +154,7 @@ carried by the metadata and the signed catalog instead.
 
 `runtimeVersion`, plus exactly one `releases[]` entry per architecture carrying `runtimeVersion`,
 `platform`, `architecture`, `nodeVersion`, `harnessVersion`, `pnpmVersion`, `nodeArchiveSHA256`,
-`harnessPackageIntegrity`, `pnpmPackageIntegrity`, `dependencyLockSHA256`, `pluginMarket`,
+`harnessPackageIntegrity`, `pnpmPackageIntegrity`, `dependencyLockSHA256`,
 `dataFormat`, and `artifact` (`runtimeVersion`, `architecture`, `url`, `sha256`, `size`).
 
 ### Signature envelope (`schemaVersion: 1`)
@@ -192,7 +192,7 @@ build (once per architecture)
         ▼
 audit dependencies (a new install / native build script in the closure → fail)
         ▼
-generate manifest (platform / dependencyLockSHA256 / provenance / pluginMarket / dataFormat)
+generate manifest (platform / dependencyLockSHA256 / provenance / dataFormat)
         ▼
 package + SHA-256
         ▼
@@ -218,7 +218,6 @@ A failure at any step produces no new usable catalog.
 | `RUNTIME_VERSION` is not a valid Harness version, or carries a build counter | build fails |
 | `PNPM_VERSION` is missing | build fails |
 | The Node archive does not match its official `SHASUMS256.txt` | build fails |
-| No plugin market version declares support for the Harness version | build fails (unless `none` is explicit, see section 7) |
 | The dependency closure gains an unrecorded install / native build script | build fails |
 | Any smoke test assertion fails | build fails |
 | Artifact bytes do not match their metadata's `sha256`/`size` | catalog generation fails |
@@ -317,7 +316,6 @@ Repository variables:
 | `RUNTIME_DATA_FORMAT_ID` | yes | Data format ID declared by the catalog, for example `sqlite-v2` |
 | `RUNTIME_DATA_FORMAT_COMPATIBLE_WITH` | no | Comma-separated compatible older format IDs |
 | `RUNTIME_DATA_FORMAT_MIGRATION` | no | Migration identifier; clients never run migrations automatically |
-| `RUNTIME_PLUGIN_MARKET_VERSION` | no | Pin the plugin market version; empty resolves it per Harness version |
 
 Environment and secret:
 
@@ -346,25 +344,18 @@ directory and run the smoke test → write the artifact, manifest and metadata u
 | `PNPM_VERSION` | none | Required; the build fails without it (see below) |
 | `HARNESS_VERSION` | equals `RUNTIME_VERSION` | If provided explicitly, it MUST match `RUNTIME_VERSION` |
 | `DSH_RUNTIME_DATA_FORMAT_ID` | empty | Written to the manifest as `dataFormat.id` |
-| `NODE_VERSION` | pinned in the script | Packaged Node version |
+| `NODE_VERSION` | `26.12.1` | Packaged Node version |
 | `NPM_REGISTRY` | `https://registry.npmjs.org` | Dependency source, recorded in the manifest |
 | `OUTPUT_DIR` | `RuntimeArtifacts/` | Output directory |
 | `WORK_DIR` | temporary directory | Reuse it to keep download and install caches |
 | `RUNTIME_ARTIFACT_BASE_URL` | GitHub release URL | Download URL written to the metadata |
-| `PLUGIN_MARKET_VERSION` | resolved | Pin the plugin market version; `none` publishes no pin |
 | `DSH_RUNTIME_ALLOW_UNPINNED_PNPM=1` | off | Let a local build resolve the latest pnpm; such builds are not publishable |
-| `DSH_RUNTIME_ALLOW_MISSING_PLUGIN_MARKET=1` | off | Allow publishing without a plugin market pin |
 
-Plugin market pin: which market version works is decided by the Harness version inside this Runtime, so
-the pin travels with the Runtime instead of being compiled into the app.
-`Scripts/resolve-plugin-market.js` reads each version's `peerDependencies` declaration
-(`@deepseek-ai/dsh-settings`, then `@deepseek-ai/dsh`), picks the newest released version whose range
-covers the current Harness (falling back to a prerelease only when no release does), and skips any
-version whose range cannot be parsed. The resulting `{package, version, integrity, harnessRange}` is
-written into the manifest, the metadata, and the catalog. The default is fail closed: when no version
-declares support for that Harness, the build fails and points at the two remedies — pin a version with
-`PLUGIN_MARKET_VERSION`, or publish no pin with `none` (clients then fall back to their compiled pin
-and report the incompatibility).
+Official Custom plugin markets ship in the Harness dependency closure; their index sources are
+stored in the profile through Harness Settings. Runtime no longer separately resolves, installs or
+checks the third-party `dshmarket`. New manifests, metadata and catalogs omit the retired
+`pluginMarket` field. Older apps may still use their compiled fallback pin when the field is absent;
+stopping automatic legacy market management also requires an app with the migration implemented.
 
 ## 8. Verification and tests
 
@@ -379,9 +370,9 @@ Scripts/verify-published-runtime.sh   post-publish re-download verification (rea
 ```
 
 `Scripts/run-tests.sh` covers version parsing and build-input validation, catalog and metadata rules
-(including `dataFormat`, `pluginMarket`, `sha256`, `size`, and cross-architecture contract equality),
-catalog downgrade refusal, signing and envelope verification, the dependency audit, plugin-market
-range semantics and resolution, process-tree cleanup against real processes
+(including `dataFormat`, `sha256`, `size`, and cross-architecture contract equality),
+catalog downgrade refusal, signing and envelope verification, the dependency audit, process-tree
+cleanup against real processes
 (`Scripts/tests/process-tree-scenarios.sh`), and negative cases against broken artifacts.
 
 Tests come in two layers so pull requests stay fast:
@@ -406,20 +397,15 @@ Smoke test checks:
    `koffi` version must also match the exact pin upstream declares (it is the Harness's only native
    runtime dependency and must not move silently);
 6. a pty can really spawn a process and return its output (exercising `spawn-helper`);
-7. when the manifest carries a plugin market pin, it is installed into a scratch profile exactly as the
-   app does it, and the profile's `package.json`, `node_modules` version, and `pnpm-lock.yaml` version
-   and integrity are checked;
-8. Harness starts with `web --host 127.0.0.1 --port 0 --no-open`, exchanges the token, and answers
-   `settings/describe` — which also proves a profile carrying the pinned market boots;
-9. the process is still alive after the probe and exits cleanly on SIGTERM;
-10. every process observed under Harness while it was running is gone afterwards (Harness may fork its
+7. Harness starts with `web --host 127.0.0.1 --port 0 --no-open`, exchanges the token, and answers
+   `settings/describe`;
+8. the process is still alive after the probe and exits cleanly on SIGTERM;
+9. every process observed under Harness while it was running is gone afterwards (Harness may fork its
     own host process), so no orphan outlives the shutdown.
 
-The smoke test needs no account and no API key. Only step 7 requires the network (the market install)
-and can be skipped with `DSH_RUNTIME_SMOKE_SKIP_PLUGIN_MARKET=1`. The environment is isolated: `HOME`,
-`XDG_*`, and `DSH_HOME` all point into a temporary directory, so no real user data is read or written.
-That step installs with scripts disabled, matching the app's policy; see section 3 of
-`docs/runtime-contract.md`.
+The smoke test needs no account or API key and installs no additional plugins. HTTP probes target
+the local Harness. The environment is isolated: `HOME`, `XDG_*`, and `DSH_HOME` all point into a
+temporary directory, so no real user data is read or written.
 
 **Not covered**: the smoke test creates no session, calls no model, does not exercise the plugin
 market's own HTTP routes or UI, and runs no confined command — whether Seatbelt is usable on a given
@@ -498,5 +484,4 @@ The `docs/` files are currently Chinese only.
 | `Scripts/sign-runtime-catalog.sh` | Sign the catalog with the Ed25519 private key |
 | `Scripts/verify-runtime-catalog.sh` | Verify a signature envelope and decode its payload |
 | `Scripts/verify-published-runtime.sh` | Re-download and verify the published catalog and artifacts |
-| `Scripts/resolve-plugin-market.js` | Resolve the plugin market version compatible with the Harness |
 | `Scripts/run-tests.sh` | Offline test suite |

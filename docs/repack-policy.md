@@ -10,7 +10,7 @@
 | 检查 | 结论 | 证据 |
 | --- | --- | --- |
 | 1. Catalog 是否已提供全部必要信息 | **是**。线上 payload 每个 release 带 `artifact { runtimeVersion, architecture, url, sha256, size }`，`sha256` 是 64 位 hex 摘要 | 实测线上 catalog（`verify-runtime-catalog.sh` 解出的 payload）；生成逻辑 `build-runtime.sh:399-428` |
-| 2. Manifest 是否足以验证安装内容 | **不足以承担身份**。它记录 `nodeSHA256`、两个 package integrity、`dependencyLockSHA256`、`dataFormat`、`pluginMarket`，但**不可能包含自身归档的 sha**（自引用悖论）。因此"这份字节"的身份只能由 **catalog 提供、App 持久化** | `build-runtime.sh:294-359`；客户端比较逻辑（App 侧 `RuntimeInstallationManifest.matches`）不含 artifact 摘要 |
+| 2. Manifest 是否足以验证安装内容 | **不足以承担身份**。它记录 `nodeSHA256`、两个 package integrity、`dependencyLockSHA256`、`dataFormat`，但**不可能包含自身归档的 sha**（自引用悖论）。因此"这份字节"的身份只能由 **catalog 提供、App 持久化** | `build-runtime.sh:294-359`；客户端比较逻辑（App 侧 `RuntimeInstallationManifest.matches`）不含 artifact 摘要 |
 | 3. 重新打包后 SHA 是否一定重算 | **是**。catalog 生成时对**磁盘上的产物字节**重新哈希与量长，与 metadata 不一致即拒绝；重建本身会产生新字节（mtime 等），因此新 sha | `generate-runtime-catalog.sh:130-149` |
 | 4. Catalog 与 Artifact 的非原子窗口 | **存在但方向安全**：流水线先逐个上传 artifact，最后上传 catalog。窗口内 = "新字节 + 旧 catalog" → 客户端 sha 校验失败并拒绝安装；**不会**出现"catalog 指向不存在的对象" | `runtime-builder.yml:480-513`（artifact 循环在前，catalog 在后） |
 | 5. 旧 Catalog 缓存与新 Artifact 混用 | 发布端无法避免客户端缓存过期；正确处置在 App：**sha 不匹配 ⇒ 绕过缓存重取一次 catalog**，仍不匹配才报错。**不得**用"同版本缓存优先"丢弃更新的远端内容（App 当前实现会丢弃，导致永久失败） | 发布端不缓存；App 侧问题见审计报告 |

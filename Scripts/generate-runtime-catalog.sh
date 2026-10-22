@@ -102,24 +102,6 @@ const sha256File = (filePath) => new Promise((resolve, reject) => {
         metadata.dataFormat.compatibleWith.some((value) => typeof value !== "string" || !value.trim())) {
       throw new Error(`invalid data format declaration in ${metadataPath}`);
     }
-    // Which plugin market version runs on this Harness is decided by the build, so
-    // the metadata has to carry that decision: the key must be present even when
-    // the answer is "publish no pin", which is only reachable through an explicit
-    // opt-out in build-runtime.sh.
-    if (!Object.prototype.hasOwnProperty.call(metadata, "pluginMarket")) {
-      throw new Error(`artifact metadata does not decide on a plugin market pin in ${metadataPath}`);
-    }
-    if (metadata.pluginMarket !== null) {
-      const pin = metadata.pluginMarket;
-      const invalid = !pin || typeof pin.package !== "string" || !pin.package.trim() ||
-        typeof pin.version !== "string" || !pin.version.trim() ||
-        typeof pin.integrity !== "string" || !pin.integrity.trim();
-      const invalidRange = pin && pin.harnessRange != null &&
-        (typeof pin.harnessRange !== "string" || !pin.harnessRange.trim());
-      if (invalid || invalidRange) {
-        throw new Error(`invalid plugin market pin in ${metadataPath}`);
-      }
-    }
     const expectedArtifact = `dsh-runtime-${runtimeVersion}-${metadata.architecture}.tar.gz`;
     const expectedManifest = `manifest-${runtimeVersion}-${metadata.architecture}.json`;
     if (metadata.artifact !== expectedArtifact || metadata.manifest !== expectedManifest) {
@@ -160,12 +142,6 @@ const sha256File = (filePath) => new Promise((resolve, reject) => {
       harnessPackageIntegrity: metadata.harnessPackageIntegrity,
       pnpmPackageIntegrity: metadata.pnpmPackageIntegrity,
       dependencyLockSHA256: metadata.dependencyLockSHA256 || null,
-      pluginMarket: metadata.pluginMarket === null ? null : {
-        package: metadata.pluginMarket.package,
-        version: metadata.pluginMarket.version,
-        integrity: metadata.pluginMarket.integrity,
-        harnessRange: metadata.pluginMarket.harnessRange || null
-      },
       dataFormat: metadata.dataFormat,
       artifact: {
         runtimeVersion: metadata.runtimeVersion,
@@ -178,7 +154,7 @@ const sha256File = (filePath) => new Promise((resolve, reject) => {
   }
 
   // Both architectures build independently, so name the field that disagrees:
-  // "the plugin market published between the two builds" is the likely cause.
+  // Node, pnpm and data-format decisions must describe one shared Runtime.
   const contractFields = (release) => ({
     platform: release.platform,
     nodeVersion: release.nodeVersion,
@@ -186,7 +162,6 @@ const sha256File = (filePath) => new Promise((resolve, reject) => {
     pnpmVersion: release.pnpmVersion,
     harnessPackageIntegrity: release.harnessPackageIntegrity,
     pnpmPackageIntegrity: release.pnpmPackageIntegrity,
-    pluginMarket: release.pluginMarket,
     dataFormat: release.dataFormat
   });
   const reference = contractFields(releases[0]);

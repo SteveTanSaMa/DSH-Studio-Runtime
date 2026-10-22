@@ -20,7 +20,7 @@ require_command() {
 
 RUNTIME_VERSION="${RUNTIME_VERSION:-${1:-}}"
 ARCHITECTURE="${ARCHITECTURE:-${2:-}}"
-NODE_VERSION="${NODE_VERSION:-24.19.0}"
+NODE_VERSION="${NODE_VERSION:-26.12.1}"
 REGISTRY="${NPM_REGISTRY:-https://registry.npmjs.org}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPOSITORY_ROOT/RuntimeArtifacts}"
 ARTIFACT_BASE_URL="${RUNTIME_ARTIFACT_BASE_URL:-https://github.com/SteveTanSaMa/DSH-Studio-Runtime/releases/download/runtime-${RUNTIME_VERSION}}"
@@ -91,15 +91,6 @@ PNPM_VERSION="${PNPM_VERSION:-}"
 DATA_FORMAT_ID="${DSH_RUNTIME_DATA_FORMAT_ID:-}"
 DATA_FORMAT_COMPATIBLE_WITH="${DSH_RUNTIME_DATA_FORMAT_COMPATIBLE_WITH:-}"
 DATA_FORMAT_MIGRATION="${DSH_RUNTIME_DATA_FORMAT_MIGRATION:-}"
-PLUGIN_MARKET_PACKAGE="${PLUGIN_MARKET_PACKAGE:-dshmarket}"
-PLUGIN_MARKET_VERSION="${PLUGIN_MARKET_VERSION:-}"
-# `PLUGIN_MARKET_VERSION=none` spells the explicit "publish no pin" decision the
-# release workflow offers, so an operator never has to edit this script to ship a
-# Runtime while the market is still catching up with a new Harness line.
-if [ "$PLUGIN_MARKET_VERSION" = "none" ]; then
-    PLUGIN_MARKET_VERSION=""
-    DSH_RUNTIME_ALLOW_MISSING_PLUGIN_MARKET=1
-fi
 
 # Fail before downloading anything: the identity is known up front, and a typo
 # in it must not cost a Node.js download first.
@@ -231,29 +222,6 @@ SPAWN_HELPER="$NATIVE_ROOT/spawn-helper"
 [ -f "$SPAWN_HELPER" ] || die "node-pty spawn helper is missing"
 chmod 755 "$SPAWN_HELPER"
 
-# Which first-party plugin market works is decided by the Harness version this
-# artifact ships, and only the publisher knows that pairing — so it is resolved
-# here and written into the manifest, where DSH Studio reads it instead of
-# relying on a version compiled into the app.
-PLUGIN_MARKET_FILE="$WORK_DIR/plugin-market.json"
-resolve_plugin_market() {
-    local arguments=(--harness "$HARNESS_VERSION" --registry "$REGISTRY" --package "$PLUGIN_MARKET_PACKAGE")
-    if [ -n "$PLUGIN_MARKET_VERSION" ]; then
-        arguments+=(--version "$PLUGIN_MARKET_VERSION")
-    fi
-    "$NODE_EXECUTABLE" "$SCRIPT_DIR/resolve-plugin-market.js" "${arguments[@]}" > "$PLUGIN_MARKET_FILE"
-}
-
-printf 'Resolving the plugin market pin for Harness %s\n' "$HARNESS_VERSION"
-if ! resolve_plugin_market; then
-    if [ "${DSH_RUNTIME_ALLOW_MISSING_PLUGIN_MARKET:-0}" = "1" ]; then
-        printf 'WARNING: publishing without a plugin market pin; DSH Studio falls back to its compiled pin.\n' >&2
-        printf 'null\n' > "$PLUGIN_MARKET_FILE"
-    else
-        die "could not resolve a $PLUGIN_MARKET_PACKAGE version for Harness $HARNESS_VERSION: wait for a market release that covers it, pin one with PLUGIN_MARKET_VERSION=<version>, or set DSH_RUNTIME_ALLOW_MISSING_PLUGIN_MARKET=1 to publish without a pin"
-    fi
-fi
-
 export DSH_RUNTIME_VERSION="$RUNTIME_VERSION"
 export DSH_RUNTIME_PLATFORM="$RUNTIME_PLATFORM"
 export DSH_RUNTIME_ARCHITECTURE="$ARCHITECTURE"
@@ -263,7 +231,6 @@ export DSH_RUNTIME_PNPM_VERSION="$PNPM_VERSION"
 export DSH_RUNTIME_NODE_SHA256="$ACTUAL_NODE_SHA256"
 export DSH_RUNTIME_REGISTRY="$REGISTRY"
 export DSH_RUNTIME_LOCK_SHA256="$(shasum -a 256 "$HARNESS_ROOT/package-lock.json" | awk '{print $1}')"
-export DSH_RUNTIME_PLUGIN_MARKET_FILE="$PLUGIN_MARKET_FILE"
 export DSH_RUNTIME_SOURCE_COMMIT="${BUILD_SOURCE_COMMIT:-}"
 export DSH_RUNTIME_SOURCE_REF="${BUILD_SOURCE_REF:-}"
 export DSH_RUNTIME_RUN_ID="${BUILD_RUN_ID:-}"
@@ -287,12 +254,6 @@ const compatibleWith = (process.env.DSH_RUNTIME_DATA_FORMAT_COMPATIBLE_WITH || "
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
-const pluginMarket = JSON.parse(fs.readFileSync(process.env.DSH_RUNTIME_PLUGIN_MARKET_FILE, "utf8"));
-if (pluginMarket !== null &&
-    (!pluginMarket.package || !pluginMarket.version || !pluginMarket.integrity ||
-     (pluginMarket.harnessRange != null && !pluginMarket.harnessRange))) {
-  throw new Error("the resolved plugin market pin is incomplete");
-}
 if (lock.lockfileVersion !== 3 ||
     dependencies["@deepseek-ai/dsh"] !== expectedHarness ||
     dependencies.pnpm !== expectedPnpm ||
@@ -313,12 +274,6 @@ const manifest = {
   pnpmPackageIntegrity: pnpm.integrity,
   registry: process.env.DSH_RUNTIME_REGISTRY,
   dependencyLockSHA256: process.env.DSH_RUNTIME_LOCK_SHA256,
-  pluginMarket: pluginMarket === null ? null : {
-    package: pluginMarket.package,
-    version: pluginMarket.version,
-    integrity: pluginMarket.integrity,
-    harnessRange: pluginMarket.harnessRange || null
-  },
   dataFormat: dataFormatID ? {
     id: dataFormatID,
     compatibleWith,
@@ -396,7 +351,6 @@ const metadata = {
   pnpmPackageIntegrity: manifest.pnpmPackageIntegrity,
   dependencyLockSHA256: manifest.dependencyLockSHA256,
   provenance: manifest.provenance || null,
-  pluginMarket: manifest.pluginMarket,
   dataFormat: manifest.dataFormat,
   artifact: artifactName,
   sha256: process.env.DSH_RUNTIME_ARTIFACT_SHA256,

@@ -101,19 +101,13 @@ make_fixture() {
   "runtimeVersion": "$version",
   "platform": "macos",
   "architecture": "$architecture",
-  "nodeVersion": "24.19.0",
+  "nodeVersion": "26.12.1",
   "harnessVersion": "$version",
   "pnpmVersion": "11.22.0",
   "nodeArchiveSHA256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "harnessPackageIntegrity": "sha512-fixture-harness",
   "pnpmPackageIntegrity": "sha512-fixture-pnpm",
   "dependencyLockSHA256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-  "pluginMarket": {
-    "package": "dshmarket",
-    "version": "1.66.5",
-    "integrity": "sha512-fixture-market",
-    "harnessRange": "^0.1.0 || ^0.2.0"
-  },
   "dataFormat": { "id": "sqlite-v2", "compatibleWith": [], "migration": null },
   "artifact": "$artifact",
   "sha256": "$(sha256_of "$directory/$artifact")",
@@ -172,7 +166,7 @@ make_fake_runtime() {
   "runtimeVersion": "0.1.1-rc.2",
   "platform": "macos",
   "architecture": "darwin-arm64",
-  "nodeVersion": "24.19.0",
+  "nodeVersion": "26.12.1",
   "harnessVersion": "0.1.1-rc.2",
   "pnpmVersion": "11.22.0",
   "nodeSHA256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -228,13 +222,10 @@ for (const release of catalog.releases) {
   assert.strictEqual(release.harnessVersion, "0.1.1-rc.2");
   assert.strictEqual(release.platform, "macos");
   assert.strictEqual(release.runtimeRevision, undefined);
+  assert.strictEqual(Object.hasOwn(release, "pluginMarket"), false);
   assert.strictEqual(release.dataFormat.id, "sqlite-v2");
   assert.ok(release.artifact.size > 0);
   assert.match(release.artifact.sha256, /^[0-9a-f]{64}$/);
-  assert.strictEqual(release.pluginMarket.package, "dshmarket");
-  assert.strictEqual(release.pluginMarket.version, "1.66.5");
-  assert.strictEqual(release.pluginMarket.integrity, "sha512-fixture-market");
-  assert.strictEqual(release.pluginMarket.harnessRange, "^0.1.0 || ^0.2.0");
   // The artifact name is the version and the architecture, with no suffix.
   assert.strictEqual(release.artifact.url.endsWith(`/runtime-0.1.1-rc.2/dsh-runtime-0.1.1-rc.2-${release.architecture}.tar.gz`), true);
   assert.doesNotMatch(release.artifact.url, /-ver[0-9]|-r[0-9]|-rebuild-|-revision-/);
@@ -298,7 +289,7 @@ expect_failure "refuses metadata whose artifact name does not follow the version
     "0.1.1-rc.2" "$WORK_DIR/bad-name/catalog.json" "$WORK_DIR"/bad-name/artifact-*.json
 
 cp -R "$WORK_DIR/ok" "$WORK_DIR/bad-contract"
-edit_json "$WORK_DIR/bad-contract/artifact-0.1.1-rc.2-darwin-x64.json" 'value.nodeVersion = "24.20.0"'
+edit_json "$WORK_DIR/bad-contract/artifact-0.1.1-rc.2-darwin-x64.json" 'value.nodeVersion = "26.12.2"'
 expect_failure "refuses architectures that disagree about the Runtime contract" \
     "$SCRIPT_DIR/generate-runtime-catalog.sh" \
     "0.1.1-rc.2" "$WORK_DIR/bad-contract/catalog.json" "$WORK_DIR"/bad-contract/artifact-*.json
@@ -308,44 +299,6 @@ edit_json "$WORK_DIR/bad-harness/artifact-0.1.1-rc.2-darwin-x64.json" 'value.har
 expect_failure "refuses metadata whose Harness version disagrees with the version" \
     "$SCRIPT_DIR/generate-runtime-catalog.sh" \
     "0.1.1-rc.2" "$WORK_DIR/bad-harness/catalog.json" "$WORK_DIR"/bad-harness/artifact-*.json
-
-cp -R "$WORK_DIR/ok" "$WORK_DIR/no-pin"
-node -e '
-const fs = require("fs");
-for (const file of process.argv.slice(1)) {
-  const metadata = JSON.parse(fs.readFileSync(file, "utf8"));
-  delete metadata.pluginMarket;
-  fs.writeFileSync(file, JSON.stringify(metadata, null, 2));
-}
-' "$WORK_DIR"/no-pin/artifact-*.json
-expect_failure "refuses metadata that never decided on a plugin market pin" \
-    "$SCRIPT_DIR/generate-runtime-catalog.sh" \
-    "0.1.1-rc.2" "$WORK_DIR/no-pin/catalog.json" "$WORK_DIR"/no-pin/artifact-*.json
-
-cp -R "$WORK_DIR/ok" "$WORK_DIR/bad-pin"
-edit_json "$WORK_DIR/bad-pin/artifact-0.1.1-rc.2-darwin-x64.json" 'value.pluginMarket.integrity = ""'
-expect_failure "refuses a plugin market pin without an integrity" \
-    "$SCRIPT_DIR/generate-runtime-catalog.sh" \
-    "0.1.1-rc.2" "$WORK_DIR/bad-pin/catalog.json" "$WORK_DIR"/bad-pin/artifact-*.json
-
-cp -R "$WORK_DIR/ok" "$WORK_DIR/pin-contract"
-edit_json "$WORK_DIR/pin-contract/artifact-0.1.1-rc.2-darwin-x64.json" 'value.pluginMarket.version = "1.70.0"'
-expect_failure "refuses architectures that disagree about the plugin market pin" \
-    "$SCRIPT_DIR/generate-runtime-catalog.sh" \
-    "0.1.1-rc.2" "$WORK_DIR/pin-contract/catalog.json" "$WORK_DIR"/pin-contract/artifact-*.json
-
-cp -R "$WORK_DIR/ok" "$WORK_DIR/null-pin"
-node -e '
-const fs = require("fs");
-for (const file of process.argv.slice(1)) {
-  const metadata = JSON.parse(fs.readFileSync(file, "utf8"));
-  metadata.pluginMarket = null;
-  fs.writeFileSync(file, JSON.stringify(metadata, null, 2));
-}
-' "$WORK_DIR"/null-pin/artifact-*.json
-expect_success "publishes no plugin market pin when that decision is explicit" \
-    "$SCRIPT_DIR/generate-runtime-catalog.sh" \
-    "0.1.1-rc.2" "$WORK_DIR/null-pin/catalog.json" "$WORK_DIR"/null-pin/artifact-*.json
 
 echo "signing and signature verification"
 node -e '
@@ -478,6 +431,7 @@ for (const release of catalog.releases) {
   assert.strictEqual(release.runtimeVersion, catalog.runtimeVersion);
   assert.strictEqual(release.harnessVersion, catalog.runtimeVersion);
   assert.strictEqual(release.runtimeRevision, undefined);
+  assert.strictEqual(Object.hasOwn(release, "pluginMarket"), false);
   assert.doesNotMatch(release.artifact.url, /-ver[0-9]|-r[0-9]|-rebuild-|-revision-/);
 }
 ' "$WORK_DIR/v1/catalog.json"
@@ -731,80 +685,6 @@ expect_success "never signals a process it did not record" \
     "$PROCESS_SCENARIOS" leaves-unrelated-alone
 expect_success "refuses to signal its own shell or an unrelated PID" \
     "$PROCESS_SCENARIOS" protects-itself
-
-echo "plugin market pin"
-expect_success "range semantics match DSH Studio's PluginCompatibility" \
-    node -e '
-const assert = require("assert");
-const { satisfies } = require(process.argv[1]);
-const legacy = "^0.1.0-rc.7 || ^0.1.1-rc.2 || ^0.1.2-alpha.2";
-const current = `${legacy} || ^0.2.0-rc.1`;
-// The production failure: the market that listed 0.1.x only, and the Runtime that moved to 0.2.
-assert.strictEqual(satisfies("0.2.0-rc.1", legacy), false);
-assert.strictEqual(satisfies("0.1.7-rc.2", legacy), true);
-assert.strictEqual(satisfies("0.1.0-rc.6", legacy), false);
-assert.strictEqual(satisfies("0.2.0-rc.1", current), true);
-assert.strictEqual(satisfies("0.1.7-rc.2", current), true);
-assert.strictEqual(satisfies("0.3.0-rc.1", current), false);
-// Prereleases are judged on their line, except when the range names that build.
-assert.strictEqual(satisfies("0.1.6-alpha.2", "^0.1.0-rc.7"), true);
-assert.strictEqual(satisfies("0.1.0-rc.6", "^0.1.0-rc.7"), false);
-assert.strictEqual(satisfies("0.2.0-rc.1", "^0.2.0-rc.1"), true);
-assert.strictEqual(satisfies("0.2.0-beta.1", "^0.2.0-rc.1"), false);
-assert.strictEqual(satisfies("0.2.0", "^0.2.0-rc.1"), true);
-assert.strictEqual(satisfies("0.2.0-rc.1", "^0.1.2-alpha.2"), false);
-// Operators.
-assert.strictEqual(satisfies("0.1.5", "~0.1.2"), true);
-assert.strictEqual(satisfies("0.2.0", "~0.1.2"), false);
-assert.strictEqual(satisfies("1.2.3", "^1.2.3"), true);
-assert.strictEqual(satisfies("2.0.0", "^1.2.3"), false);
-assert.strictEqual(satisfies("0.3.0", "0.0.3"), false);
-assert.strictEqual(satisfies("0.0.30", ">=0.0.3 <0.0.4"), false);
-assert.strictEqual(satisfies("0.1.5", ">=0.1.2 <0.2.0"), true);
-assert.strictEqual(satisfies("0.2.0", ">=0.1.2 <0.2.0"), false);
-assert.strictEqual(satisfies("0.2.0-rc.1", "0.2.0-rc.1"), true);
-assert.strictEqual(satisfies("0.2.0", "0.2.0-rc.1"), false);
-assert.strictEqual(satisfies("1.2.3+build.5", "^1.2.3"), true);
-// Unreadable ranges are undecidable, never a verdict.
-assert.strictEqual(satisfies("0.2.0-rc.1", "latest"), null);
-assert.strictEqual(satisfies("0.2.0-rc.1", "^0.2.0 || "), null);
-assert.strictEqual(satisfies("0.2.0-rc.1", "^abc"), null);
-assert.strictEqual(satisfies("0.2.0-rc.1", "^0.2.0, <0.3.0"), null);
-assert.strictEqual(satisfies("not-a-version", "^0.2.0"), null);
-' "$SCRIPT_DIR/resolve-plugin-market.js"
-
-expect_success "pin selection takes the newest compatible released version" \
-    node -e '
-const assert = require("assert");
-const { selectPin } = require(process.argv[1]);
-const legacy = "^0.1.0-rc.7 || ^0.1.1-rc.2 || ^0.1.2-alpha.2";
-const candidates = [
-  { version: "1.62.0", integrity: "sha512-old", harnessRange: legacy },
-  { version: "1.66.5", integrity: "sha512-pin", harnessRange: `${legacy} || ^0.2.0-rc.1` },
-  { version: "1.70.0", integrity: "sha512-new", harnessRange: "^0.3.0" },
-  { version: "1.71.0-beta.1", integrity: "sha512-beta", harnessRange: "^0.2.0" },
-  { version: "1.72.0", integrity: "", harnessRange: "^0.2.0" },
-  { version: "1.73.0", integrity: "sha512-norange", harnessRange: null },
-  { version: "1.74.0", integrity: "sha512-unreadable", harnessRange: "works-with-everything" }
-];
-assert.strictEqual(selectPin(candidates, "0.2.0-rc.1").version, "1.66.5");
-assert.strictEqual(selectPin(candidates, "0.1.7-rc.2").version, "1.66.5");
-// A prerelease is only chosen when no released version covers the Harness.
-assert.strictEqual(selectPin([candidates[3]], "0.2.0-rc.1").version, "1.71.0-beta.1");
-assert.throws(() => selectPin(candidates, "9.9.9"), /no dshmarket version declares support/);
-' "$SCRIPT_DIR/resolve-plugin-market.js"
-
-expect_success "declared Harness range prefers the package the market names" \
-    node -e '
-const assert = require("assert");
-const { declaredHarnessRange } = require(process.argv[1]);
-assert.strictEqual(declaredHarnessRange({
-  peerDependencies: { "@deepseek-ai/dsh": "^1.0.0", "@deepseek-ai/dsh-settings": "^0.2.0" }
-}), "^0.2.0");
-assert.strictEqual(declaredHarnessRange({ peerDependencies: { "@deepseek-ai/dsh": "^1.0.0" } }), "^1.0.0");
-assert.strictEqual(declaredHarnessRange({ peerDependencies: {} }), null);
-assert.strictEqual(declaredHarnessRange({}), null);
-' "$SCRIPT_DIR/resolve-plugin-market.js"
 
 echo "runtime-smoke.sh detects broken artifacts"
 make_fake_runtime "$WORK_DIR/fake-ok"

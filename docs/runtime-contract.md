@@ -113,42 +113,24 @@ artifact: https://github.com/SteveTanSaMa/DSH-Studio-Runtime/releases/download/r
 | `releases[].harnessPackageIntegrity` / `pnpmPackageIntegrity` | 是 | 非空 npm integrity |
 | `releases[].dependencyLockSHA256` | 否 | 审计用，客户端忽略 |
 | `releases[].dataFormat` | **事实上必填** | `{id, compatibleWith[], migration}`；缺失会被当成 unknown 并阻塞已存在数据的用户更新 |
-| `releases[].pluginMarket` | **事实上必填** | `{package, version, integrity, harnessRange}`；客户端据此安装插件市场，缺失时回退到 App 编译内的兜底 pin |
 | `releases[].artifact.runtimeVersion` / `architecture` | 是 | 必须与 release 一致 |
 | `releases[].artifact.url` | 是 | 必须等于第 1 节的固定形状 |
 | `releases[].artifact.sha256` | 是 | 64 位十六进制；下载后逐字节校验 |
 | `releases[].artifact.size` | 否 | 审计/运维用，客户端忽略 |
 
-未知字段被忽略（Swift `Codable` 合成实现），所以**新增字段是兼容的**，删除或改变已有
+未知字段被忽略（Swift `Codable` 合成实现），所以**新增字段是兼容的**，删除或改变已有必填
 字段语义不兼容。`schemaVersion` 不能在不破坏旧客户端的前提下改变含义：客户端遇到未知的
 `schemaVersion` 会整体拒绝。
 
-### Plugin market pin
+### 插件市场职责
 
-`pluginMarket` 和 `dataFormat` 一样，是「发布管线必须做出决定」的字段——决定权在构建
-Runtime 的人手里，因为只有它同时知道 Harness 版本和市场的兼容声明：
+官方 Custom plugin markets 随 Harness 依赖闭包提供，索引源由 Harness Settings 保存在 Profile，
+不进入 Runtime 签名 catalog。Runtime 不再单独解析、安装或检测第三方 `dshmarket`；新产物的
+manifest、metadata 和 catalog 不再输出旧可选字段 `pluginMarket`，不要求升级 schema。
+旧 App 在缺失该字段时仍可能使用编译内的兜底 pin，因此停止自动托管旧市场还需要使用已完成迁移的 App。
 
-- 客户端用 `package@version` 在 profile 里安装市场（`pnpm add <package>@<version>
-  --save-exact`），并要求 `pnpm-lock.yaml` 里出现同一个版本与 `integrity`；
-- `harnessRange` 抄自市场包自己的 `peerDependencies`（按 `@deepseek-ai/dsh-settings`、
-  其次 `@deepseek-ai/dsh` 的顺序读取，两者共享同一个版本号）；
-- 兼容性由客户端按 `PluginCompatibility` 的语义判断：在范围内才允许安装，不在范围内就以
-  「需要 X，当前为 Y」明确报错，范围读不懂时按兼容处理而不是拒绝；
-- 解析顺序是「已安装 Runtime 的 manifest → catalog release（仅当它描述的正是同一版本，
-  或尚未安装）→ App 编译内的兜底 pin」。因此 `pluginMarket: null` 是合法值：客户端会退回
-  兜底 pin，并在不兼容时报出范围，而不是「装上了但界面崩」。
-
-发布侧对应实现：`Scripts/resolve-plugin-market.js`（按同样的语义挑选最新兼容版本）、
-`build-runtime.sh`（写入 manifest 与 metadata）、`generate-runtime-catalog.sh`（要求这个
-决定存在并带进 catalog）、`runtime-smoke.sh`（在 scratch profile 里按 pin 实装一次并让
-Harness 带着它启动）。
-
-安装市场时**禁用 install / lifecycle script**（`npm_config_ignore_scripts=true`）：市场是
-已构建好的 tarball，安装它不该执行任何包内脚本。这是客户端策略而不是 smoke 测试的临时
-限制，`runtime-smoke.sh` 用同样的策略安装，所以它验证的就是用户真实得到的行为。Runtime
-自身的依赖闭包同样整体禁用脚本，需要构建的包由 `build-runtime.sh` 显式处理，并且由
-`Scripts/audit-dependencies.js` 保证不会有新的包悄悄漏进来；当前线已不再需要构建 `fs-ext`
-（上游改用 Node-API 模块），若它重新出现，构建会直接失败而不是产出未构建的绑定。
+Runtime 依赖闭包仍整体禁用安装脚本，`Scripts/audit-dependencies.js` 继续阻止未经审查的
+安装脚本或原生构建依赖；加载和启动验证由 `runtime-smoke.sh` 承担。
 
 ## 4. Artifact 布局与 manifest（`schemaVersion: 3`）
 
@@ -172,10 +154,6 @@ harness/<architecture>/<harnessVersion>/node_modules/node-pty/prebuilds/<archite
 `pnpmVersion`、`nodeSHA256`、`harnessPackageIntegrity`、`pnpmPackageIntegrity`、
 `dataFormat`。多出来的字段（`platform`、`dependencyLockSHA256`、`provenance`）被忽略，可以
 安全新增。
-
-`pluginMarket` 也写在 manifest 里，让离线安装自带自己的市场 pin；但它**不参与版本一致性
-比较**——它描述的是配套包，不是这份安装的字节，所以同一份 Runtime 换个市场版本仍然算
-同一个安装。
 
 artifact 的字节身份（`artifact.sha256` / `size` / `url`）**不在** archive 内的
 `manifest.json` 里：manifest 是 archive 自身的一部分，把它自己的摘要写进去是循环定义。

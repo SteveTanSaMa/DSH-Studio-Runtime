@@ -135,17 +135,17 @@ harness/<architecture>/<harnessVersion>/...
 
 `schemaVersion`、`runtimeVersion`、`platform`、`architecture`、`nodeVersion`、`harnessVersion`、
 `pnpmVersion`、`nodeSHA256`、`harnessPackageIntegrity`、`pnpmPackageIntegrity`、`registry`、
-`dependencyLockSHA256`、`pluginMarket`、`dataFormat`、`provenance`。
+`dependencyLockSHA256`、`dataFormat`、`provenance`。
 
 客户端会把这组字段与签名 catalog 中的对应条目逐字段比对；新增字段是兼容的（客户端忽略未知
-字段），修改或删除已有字段的语义不兼容。artifact 自身的 `sha256`/`size` 不写在 archive 内
+字段），修改或删除已有必填字段的语义不兼容。artifact 自身的 `sha256`/`size` 不写在 archive 内
 （那会构成循环定义），而由 metadata 与签名 catalog 表达。
 
 ### catalog（签名 payload，`schemaVersion: 1`）
 
 `runtimeVersion`，以及每个架构一条 `releases[]`：`runtimeVersion`、`platform`、`architecture`、
 `nodeVersion`、`harnessVersion`、`pnpmVersion`、`nodeArchiveSHA256`、
-`harnessPackageIntegrity`、`pnpmPackageIntegrity`、`dependencyLockSHA256`、`pluginMarket`、
+`harnessPackageIntegrity`、`pnpmPackageIntegrity`、`dependencyLockSHA256`、
 `dataFormat`、`artifact`（`runtimeVersion`、`architecture`、`url`、`sha256`、`size`）。
 
 ### 签名信封（`schemaVersion: 1`）
@@ -190,7 +190,7 @@ build（每条架构各跑一次）
         ▼
 audit dependencies（依赖闭包新增未登记的 install / native 构建脚本 → 失败）
         ▼
-generate manifest（platform / dependencyLockSHA256 / provenance / pluginMarket / dataFormat）
+generate manifest（platform / dependencyLockSHA256 / provenance / dataFormat）
         ▼
 package + SHA-256
         ▼
@@ -304,7 +304,6 @@ catalog。任何一次错误的轮换都会让已发布的 App 拒绝全部 cata
 | `RUNTIME_DATA_FORMAT_ID` | 是 | catalog 声明的数据格式 ID，例如 `sqlite-v2` |
 | `RUNTIME_DATA_FORMAT_COMPATIBLE_WITH` | 否 | 逗号分隔的兼容旧格式 ID |
 | `RUNTIME_DATA_FORMAT_MIGRATION` | 否 | 迁移标识；客户端不会自动执行迁移 |
-| `RUNTIME_PLUGIN_MARKET_VERSION` | 否 | 固定插件市场版本；留空则按 Harness 版本解析 |
 
 Environment 与 secret：
 
@@ -333,22 +332,17 @@ DSH_RUNTIME_DATA_FORMAT_ID=sqlite-v2 \
 | `PNPM_VERSION` | 无 | 必填；未提供则失败（见下） |
 | `HARNESS_VERSION` | 等于 `RUNTIME_VERSION` | 若显式提供，必须与 `RUNTIME_VERSION` 相同 |
 | `DSH_RUNTIME_DATA_FORMAT_ID` | 空 | 写入 manifest 的 `dataFormat.id` |
-| `NODE_VERSION` | 脚本内 pin | 打包的 Node 版本 |
+| `NODE_VERSION` | `26.12.1` | 打包的 Node 版本 |
 | `NPM_REGISTRY` | `https://registry.npmjs.org` | 依赖来源，写入 manifest |
 | `OUTPUT_DIR` | `RuntimeArtifacts/` | 产物输出目录 |
 | `WORK_DIR` | 临时目录 | 复用可保留下载与安装缓存 |
 | `RUNTIME_ARTIFACT_BASE_URL` | GitHub Release 地址 | 写入 metadata 的下载地址 |
-| `PLUGIN_MARKET_VERSION` | 自动解析 | 固定插件市场版本；`none` 表示不发布 pin |
 | `DSH_RUNTIME_ALLOW_UNPINNED_PNPM=1` | 关闭 | 允许本地构建解析 pnpm 最新版；此类构建不可发布 |
-| `DSH_RUNTIME_ALLOW_MISSING_PLUGIN_MARKET=1` | 关闭 | 允许不发布插件市场 pin |
 
-插件市场 pin：哪个市场版本可用由该 Runtime 中的 Harness 版本决定，因此 pin 随 Runtime 发布，
-而不是编译进 App。`Scripts/resolve-plugin-market.js` 读取 registry 上各版本的
-`peerDependencies` 声明（`@deepseek-ai/dsh-settings`，其次 `@deepseek-ai/dsh`），选取覆盖当前
-Harness 的最新正式版（无正式版时才退而取预发布版）；范围无法解析的版本一律跳过。结果
-`{package, version, integrity, harnessRange}` 写入 manifest、metadata 与 catalog。默认行为是失败
-即停：没有任何版本声明支持该 Harness 时构建失败，可用 `PLUGIN_MARKET_VERSION` 指定版本，或
-`none` 明确不发布 pin（客户端退回其内置的兜底 pin 并如实报告不兼容）。
+官方 Custom plugin markets 随 Harness 依赖闭包提供，索引源由 Harness Settings 保存在 Profile。
+Runtime 不再单独解析、安装或检测第三方 `dshmarket`，新产物的 manifest、metadata 与 catalog
+均不再输出旧 `pluginMarket` 字段。旧 App 在字段缺失时仍可能使用其内置 pin；停止自动托管旧市场
+还需要使用已完成迁移的 App。
 
 ## 8. 验证与测试
 
@@ -363,8 +357,8 @@ Scripts/verify-published-runtime.sh   发布后从公开 URL 回下载验证（�
 ```
 
 `Scripts/run-tests.sh` 覆盖：版本解析与构建输入校验、catalog 与 metadata 规则（含 `dataFormat`、
-`pluginMarket`、`sha256`、`size`、跨架构契约一致性）、catalog 不降级、签名与信封校验、依赖闭包
-审计、插件市场范围语义与解析规则、进程树清理（真实进程，见
+`sha256`、`size`、跨架构契约一致性）、catalog 不降级、签名与信封校验、依赖闭包
+审计、进程树清理（真实进程，见
 `Scripts/tests/process-tree-scenarios.sh`）、以及针对损坏 artifact 的负例。
 
 测试分两层，PR 不会被拖慢：
@@ -386,18 +380,14 @@ smoke test 的检查项：
    `-sandbox-policy`（三个模式名未被改名）、`dsh-credentials-local`；同时断言 `koffi` 的已安装
    版本与上游写的精确 pin 一致（Harness 唯一的原生运行时依赖，不能静默换版本）；
 6. 能用 pty 实际启动进程并取得输出（真正使用 `spawn-helper`）；
-7. 若 manifest 带有插件市场 pin，用与 App 相同的方式在 scratch profile 中安装并核对
-   `package.json`、`node_modules` 版本与 `pnpm-lock.yaml` 中的版本和 integrity；
-8. Harness 能启动 `web --host 127.0.0.1 --port 0 --no-open`，完成 token 换取并回答
-   `settings/describe`；该步骤同时验证「带固定市场版本的 profile 能正常启动」；
-9. 探测后进程仍存活，并在收到 SIGTERM 后正常退出；
-10. 启动期间在 Harness 下观察到过的子进程（Harness 可能 fork 自身的 host 进程）全部退出，
+7. Harness 能启动 `web --host 127.0.0.1 --port 0 --no-open`，完成 token 换取并回答
+   `settings/describe`；
+8. 探测后进程仍存活，并在收到 SIGTERM 后正常退出；
+9. 启动期间在 Harness 下观察到过的子进程（Harness 可能 fork 自身的 host 进程）全部退出，
     不留 orphan。
 
-smoke test 不需要账号或 API key。唯一需要网络的是第 7 步（安装插件市场），可用
-`DSH_RUNTIME_SMOKE_SKIP_PLUGIN_MARKET=1` 跳过。运行环境隔离：`HOME`、`XDG_*`、`DSH_HOME` 均
-指向临时目录，不读写真实用户数据。该步骤的 install 脚本策略与 App 一致（禁用），见
-`docs/runtime-contract.md` 第 3 节。
+smoke test 不需要账号或 API key，也不安装额外插件。HTTP 探测只访问本机 Harness。
+运行环境隔离：`HOME`、`XDG_*`、`DSH_HOME` 均指向临时目录，不读写真实用户数据。
 
 **不覆盖**：不创建 session、不调用模型、不验证插件市场自身的 HTTP 路由与界面交互；也不执行真实的
 受限命令，因此「客户端机器上 Seatbelt 是否可用」只能由客户端在真实运行环境中判定，见
@@ -468,5 +458,4 @@ smoke test 不需要账号或 API key。唯一需要网络的是第 7 步（安�
 | `Scripts/sign-runtime-catalog.sh` | 用 Ed25519 私钥签名 catalog |
 | `Scripts/verify-runtime-catalog.sh` | 校验签名信封并解码 payload |
 | `Scripts/verify-published-runtime.sh` | 发布后按客户端视角回下载验证 |
-| `Scripts/resolve-plugin-market.js` | 解析与 Harness 兼容的插件市场版本 |
 | `Scripts/run-tests.sh` | 离线测试套件 |
