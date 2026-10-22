@@ -799,6 +799,8 @@ else
 fi
 
 echo "syntax checks"
+expect_success "bilingual release notes match the current Runtime artifacts" \
+    node --test "$SCRIPT_DIR/tests/release-notes.test.cjs"
 for script in "$SCRIPT_DIR"/*.sh "$SCRIPT_DIR"/lib/*.sh "$SCRIPT_DIR"/tests/*.sh; do
     expect_success "bash -n ${script#"$SCRIPT_DIR"/}" bash -n "$script"
 done

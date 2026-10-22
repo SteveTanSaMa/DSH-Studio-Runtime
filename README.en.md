@@ -357,6 +357,8 @@ checks the third-party `dshmarket`. New manifests, metadata and catalogs omit th
 `pluginMarket` field. Older apps may still use their compiled fallback pin when the field is absent;
 stopping automatic legacy market management also requires an app with the migration implemented.
 
+Release titles and notes put Chinese before English. `Scripts/generate-runtime-release-notes.js` generates the notes for both new and replaced releases. Each version also publishes its own `runtime-catalog.signed.json`. For a historical repack, set the workflow dispatch input `publish_catalog` to `false`: this replaces and verifies that version without moving the discovery catalog backwards. Update discovery after the latest Runtime has been verified.
+
 ## 8. Verification and tests
 
 Three layers, increasing in cost and coverage:
