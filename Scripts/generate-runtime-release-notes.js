@@ -40,7 +40,7 @@ function generateNotes(directory, runtimeVersion, repository) {
     "| --- | --- | --- | --- |"
   ];
   for (const item of metadata) {
-    lines.push(`| ${code(item.architecture)} | [tar.gz](${releaseURL}/${encodeURIComponent(item.artifact)}) | ${code(item.sha256)} | ${(item.size / 1024 / 1024).toFixed(1)} MiB |`);
+    lines.push(`| ${code(item.architecture)} | [tar.gz](${releaseURL}/${encodeURIComponent(item.artifact)}) | ${code(item.sha256)} | ${item.size} bytes |`);
   }
   lines.push("",
     `[本版签名索引 / Release catalog](${releaseURL}/runtime-catalog.signed.json) · ` +

@@ -42,6 +42,8 @@ test("shared bilingual tables retain current downloads, checksums and build link
     "owner/runtime/commit/current-commit", "owner/runtime/actions/runs/42"
   ]) assert.ok(notes.includes(expected), expected);
   assert.equal(notes.includes("\n\n---\n\n"), false);
+  assert.equal(notes.split("1234 bytes").length - 1, 2);
+  assert.doesNotMatch(notes, /\b(?:KiB|MiB|GiB)\b/);
 });
 
 test("missing or duplicate architectures cannot produce release notes", () => {
