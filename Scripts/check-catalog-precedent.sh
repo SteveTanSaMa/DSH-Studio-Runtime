@@ -10,6 +10,9 @@ set -euo pipefail
 # A missing or empty PREVIOUS_PAYLOAD_JSON means this is the first catalog.
 # ALLOW_CATALOG_DOWNGRADE=1 turns the version check into a warning for an
 # intentional backport.
+# SKIP_CATALOG_DOWNGRADE=1 returns status 3 for a downgrade, allowing scheduled
+# historical builds to publish their own release without changing discovery.
+# Other failures remain status 1 and must not be treated as a downgrade.
 #
 # Repacking the same Harness version is expected rather than forbidden: the
 # Runtime identity is the Harness version, and the artifact is identified by its
@@ -18,6 +21,7 @@ set -euo pipefail
 PREVIOUS_PATH="${1:-}"
 NEW_PATH="${2:-}"
 ALLOW_DOWNGRADE="${ALLOW_CATALOG_DOWNGRADE:-0}"
+SKIP_DOWNGRADE="${SKIP_CATALOG_DOWNGRADE:-0}"
 
 die() {
     printf 'check-catalog-precedent: %s\n' "$1" >&2
@@ -33,7 +37,7 @@ if [ -z "$PREVIOUS_PATH" ] || [ ! -f "$PREVIOUS_PATH" ]; then
     exit 0
 fi
 
-node - "$PREVIOUS_PATH" "$NEW_PATH" "$ALLOW_DOWNGRADE" <<'NODE'
+node - "$PREVIOUS_PATH" "$NEW_PATH" "$ALLOW_DOWNGRADE" "$SKIP_DOWNGRADE" <<'NODE'
 const fs = require("fs");
 
 const HARNESS_VERSION_PATTERN = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/;
@@ -121,7 +125,7 @@ function compareRuntimeVersions(left, right) {
   return compareComponents(left, right);
 }
 
-function check(previousPath, newPath, allowDowngrade) {
+function check(previousPath, newPath, allowDowngrade, skipDowngrade) {
   const previous = JSON.parse(fs.readFileSync(previousPath, "utf8"));
   const next = JSON.parse(fs.readFileSync(newPath, "utf8"));
   if (!previous.runtimeVersion || !Array.isArray(previous.releases) ||
@@ -133,6 +137,10 @@ function check(previousPath, newPath, allowDowngrade) {
   if (comparison > 0) {
     const message = `refusing to publish ${next.runtimeVersion}: the published catalog already offers ${previous.runtimeVersion}`;
     if (allowDowngrade !== "1") {
+      if (skipDowngrade === "1") {
+        process.stderr.write(`check-catalog-precedent: ${message}; publishing the historical release without updating discovery\n`);
+        process.exit(3);
+      }
       throw new Error(`${message}; set allow_catalog_downgrade to override this for an intentional backport`);
     }
     process.stderr.write(`check-catalog-precedent: warning: ${message}\n`);
@@ -161,9 +169,9 @@ function check(previousPath, newPath, allowDowngrade) {
   process.stdout.write(`Runtime catalog precedent ok: ${previous.runtimeVersion} -> ${next.runtimeVersion}\n`);
 }
 
-const [previousPath, newPath, allowDowngrade] = process.argv.slice(2);
+const [previousPath, newPath, allowDowngrade, skipDowngrade] = process.argv.slice(2);
 try {
-  check(previousPath, newPath, allowDowngrade);
+  check(previousPath, newPath, allowDowngrade, skipDowngrade);
 } catch (error) {
   process.stderr.write(`check-catalog-precedent: ${error.message}\n`);
   process.exit(1);

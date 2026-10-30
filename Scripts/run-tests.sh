@@ -462,6 +462,28 @@ expect_success "allows a downgrade only when explicitly requested" \
     env ALLOW_CATALOG_DOWNGRADE=1 \
     "$SCRIPT_DIR/check-catalog-precedent.sh" "$WORK_DIR/v1/catalog.json" "$WORK_DIR/rc1/catalog.json"
 
+echo "scheduled catalog publication"
+POLICY="$SCRIPT_DIR/resolve-catalog-publication.sh"
+expect_success "scheduled historical release leaves discovery unchanged" \
+    bash -c '[ "$("$1" "$2" "$3" schedule false)" = false ]' _ \
+    "$POLICY" "$WORK_DIR/newer-harness/catalog.json" "$WORK_DIR/older-harness/catalog.json"
+expect_success "scheduled newer release updates discovery" \
+    bash -c '[ "$("$1" "$2" "$3" schedule false)" = true ]' _ \
+    "$POLICY" "$WORK_DIR/older-harness/catalog.json" "$WORK_DIR/newer-harness/catalog.json"
+expect_success "scheduled equal version updates discovery" \
+    bash -c '[ "$("$1" "$2" "$3" schedule false)" = true ]' _ \
+    "$POLICY" "$WORK_DIR/v1/catalog.json" "$WORK_DIR/repack/catalog.json"
+expect_failure "manual downgrade still fails without explicit override" \
+    "$POLICY" "$WORK_DIR/newer-harness/catalog.json" "$WORK_DIR/older-harness/catalog.json" workflow_dispatch false
+expect_success "manual downgrade still honors explicit override" \
+    bash -c '[ "$("$1" "$2" "$3" workflow_dispatch true)" = true ]' _ \
+    "$POLICY" "$WORK_DIR/newer-harness/catalog.json" "$WORK_DIR/older-harness/catalog.json"
+printf 'not json\n' > "$WORK_DIR/malformed-catalog.json"
+expect_failure "malformed catalog fails instead of being treated as a historical release" \
+    "$POLICY" "$WORK_DIR/malformed-catalog.json" "$WORK_DIR/v1/catalog.json" schedule false
+expect_failure "missing verified catalog fails instead of being treated as a first publication" \
+    "$POLICY" "$WORK_DIR/missing-catalog.json" "$WORK_DIR/v1/catalog.json" schedule false
+
 expect_success_matching "a repack reports the replacement instead of failing" \
     "replacing the published darwin-arm64 artifact" \
     "$SCRIPT_DIR/check-catalog-precedent.sh" "$WORK_DIR/v1/catalog.json" "$WORK_DIR/repack/catalog.json"

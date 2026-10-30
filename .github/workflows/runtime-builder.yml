@@ -320,6 +320,8 @@ jobs:
     environment: runtime-signing
     permissions:
       contents: write
+    outputs:
+      publish_catalog: ${{ steps.publish.outputs.publish_catalog }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -340,12 +342,14 @@ jobs:
           HARNESS_VERSION_INPUT: ${{ needs.prepare.outputs.runtime_version }}
           PUBLISH_CATALOG_INPUT: ${{ needs.prepare.outputs.publish_catalog }}
           ALLOW_CATALOG_DOWNGRADE_INPUT: ${{ needs.prepare.outputs.allow_catalog_downgrade }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
 
           runtime_version="$RUNTIME_VERSION_INPUT"
           release_tag="runtime-${runtime_version}"
           upload_attempts=5
+          publish_catalog="$PUBLISH_CATALOG_INPUT"
 
           # The trust anchor is public and committed, so the signing key cannot
           # silently rotate away from what shipped clients trust.
@@ -402,19 +406,17 @@ jobs:
             RuntimeArtifacts/runtime-release.json \
             RuntimeArtifacts/artifact-*.json
 
-          # ... and it must never move backwards or replace published bytes.
-          # A catalog release that exists without its asset (an interrupted
-          # publish) carries nothing to compare against, so it is treated like
-          # the first publish and repaired by this run instead of blocking it.
-          if [ "$PUBLISH_CATALOG_INPUT" = "true" ]; then
-            published_catalog=""
-            if gh release view runtime-catalog --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && \
-               gh release view runtime-catalog --repo "$GITHUB_REPOSITORY" \
-                 --json assets -q '.assets[].name' | grep -qx "runtime-catalog.signed.json"; then
-              published_catalog=1
-            fi
-
-            if [ -n "$published_catalog" ]; then
+          # Fetch the release list rather than treating an API failure as an
+          # absent catalog. An existing catalog without its signed asset is also
+          # an error: its previous version cannot safely be inferred.
+          if [ "$publish_catalog" = "true" ]; then
+            catalog_release="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100&page=1" --paginate --slurp |
+              jq -c '[.[][] | select(.tag_name == "runtime-catalog")] | .[0] // null')"
+            if [ "$catalog_release" != null ]; then
+              if ! printf '%s\n' "$catalog_release" | jq -e '.assets | any(.name == "runtime-catalog.signed.json")' >/dev/null; then
+                echo "Published catalog release is missing its signed asset; refusing to update discovery." >&2
+                exit 1
+              fi
               mkdir -p RuntimeArtifacts/previous
               gh release download runtime-catalog \
                 --repo "$GITHUB_REPOSITORY" \
@@ -425,16 +427,12 @@ jobs:
                 RuntimeArtifacts/previous/runtime-catalog.signed.json \
                 "$RUNTIME_CATALOG_PUBLIC_KEY" \
                 RuntimeArtifacts/previous/payload.json
-              allow_downgrade=0
-              if [ "$ALLOW_CATALOG_DOWNGRADE_INPUT" = "true" ]; then
-                allow_downgrade=1
-              fi
-              ALLOW_CATALOG_DOWNGRADE="$allow_downgrade" \
-                ./Scripts/check-catalog-precedent.sh \
+              publish_catalog="$(./Scripts/resolve-catalog-publication.sh \
                 RuntimeArtifacts/previous/payload.json \
-                RuntimeArtifacts/runtime-release.json
+                RuntimeArtifacts/runtime-release.json \
+                "$EVENT_NAME" "$ALLOW_CATALOG_DOWNGRADE_INPUT")"
             else
-              echo "No published catalog asset yet; skipping the precedent check."
+              echo "No published catalog release yet; skipping the precedent check."
             fi
           fi
 
@@ -456,11 +454,15 @@ jobs:
               --title "$release_title" \
               --notes-file "$notes_file"
           else
+            latest_option=()
+            if [ "$publish_catalog" = "false" ]; then
+              latest_option=(--latest=false)
+            fi
             gh release create "$release_tag" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "$release_title" \
-              --notes-file "$notes_file"
+              --notes-file "$notes_file" "${latest_option[@]}"
             # Recorded so a failure below can remove the half-published release
             # instead of leaving the version permanently unbuildable.
             touch "$RUNNER_TEMP/runtime-release-created"
@@ -480,7 +482,7 @@ jobs:
           # Every release has its own signed catalog, so historical repacks can
           # be verified without moving automatic discovery back to an old version.
           upload_asset "$release_tag" RuntimeArtifacts/runtime-catalog.signed.json catalog
-          if [ "$PUBLISH_CATALOG_INPUT" = "true" ]; then
+          if [ "$publish_catalog" = "true" ]; then
             catalog_notes="$RUNNER_TEMP/runtime-catalog-notes.md"
             cat > "$catalog_notes" <<'NOTES'
           DSH Studio 用此签名索引查找最新 Runtime。 / Signed index for discovering the latest DSH Studio Runtime.
@@ -502,10 +504,10 @@ jobs:
           # The version is fully published, so later failures must not roll it
           # back.
           rm -f "$RUNNER_TEMP/runtime-release-created"
+          echo "publish_catalog=$publish_catalog" >> "$GITHUB_OUTPUT"
 
-          # The "Latest" badge is deliberately left alone. GitHub gives it to the
-          # most recently published release, which is the Runtime a visiting human
-          # wants; clients never read it, they read the signed catalog at its fixed
+          # Historical releases do not claim the "Latest" badge. Clients read
+          # the signed catalog at its fixed
           # URL. The catalog stays at the bottom of the list because the list is
           # ordered by the tag commit date; keep the catalog tag anchored to the
           # initial repository commit. The catalog release is created once,
@@ -545,7 +547,7 @@ jobs:
       - name: Verify the published catalog and artifacts
         env:
           RUNTIME_VERSION_INPUT: ${{ needs.prepare.outputs.runtime_version }}
-          PUBLISH_CATALOG_INPUT: ${{ needs.prepare.outputs.publish_catalog }}
+          PUBLISH_CATALOG_INPUT: ${{ needs.publish.outputs.publish_catalog }}
         run: |
           set -euo pipefail
           public_key="$(sed -n 's/^publicKey=//p' keys/runtime-catalog-public.txt | head -1)"
