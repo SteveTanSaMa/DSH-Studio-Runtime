@@ -1,7 +1,10 @@
 # INTEGRATION — DSH-Studio-Runtime 与其他仓库的关系
 
+> 历史记录：本文保留 2026 年 10 月的跨仓库审计及迁移观察。客户端缺口、上游能力、路径、测试和待确认事项均为当时的快照，不代表当前状态；现行 Runtime 契约以 [runtime-contract.md](../runtime-contract.md) 和仓库 [README](../../README.md) 为准。
+> 工作区迁移经过见 [WORKSPACE_MIGRATION.md](WORKSPACE_MIGRATION.md)。
+
 > 严格区分：**已验证**（有代码/产物/命令证据）与**待确认**（未验证的推测一律不写成事实）。
-> 检查时间：2026-10-11。本文件不建立任何新关系，只记录可核实的事实。
+> 原始检查时间：2026-10-11；第 3 节另记录了 2026-10-13 的迁移观察。本文件不建立任何新关系，只记录可核实的事实。
 
 ## 1. 与 DSH Studio（客户端）——**已验证，这是本项目存在的理由**
 
@@ -44,16 +47,19 @@
 **风险**：上游协议或插件机制变化会打断 smoke（fail closed，需同步更新 `Scripts/runtime-smoke.sh`）；
 历史上已发生过一次。
 
-## 3. 与 MiPlay、DXMT、LSFG——**大部分待确认**
+## 3. 与 MiPlay、DXMT、LSFG——**位置已核实，依赖关系仍未证实**
 
-| 仓库 | 核实到的事实 | 结论 |
+工作区迁移（2026-10-13）后在统一工程目录 `/Users/stevetan/SteveTan/Document/Developer` 下实际观察到：
+
+| 仓库 | 实际位置（已核实） | 与本项目的关系 |
 | --- | --- | --- |
-| MiPlay | 存在于 `/Users/stevetan/SteveTan/Document/Xcode/MiPlay`，是 git 仓库（`github.com:SteveTanSaMa/MiPlay.git`），Xcode 工程（`MiPlay.xcodeproj`、`MiPlayTests`、QA/性能目录） | **与本项目无已证实关系**：本仓库 grep 无任何 MiPlay 引用；MiPlay 的文本文件里也没有 DSH Studio 引用。**待确认**是否需要工程级协调。 |
-| DXMT | 在 `Xcode/`、`Xcode/MiPlay` 下**均未找到** | **待确认**：本地不可见，无法判断关系。 |
-| LSFG | 同上，**未找到** | **待确认**。 |
-| AnimeGameWineReleaseFetcher | 本地存在（`Xcode/` 下），未做进一步检查 | **待确认**。 |
+| MiPlay | `Developer/MiPlay/MiPlay App`（git 仓库，HEAD `b5ce2b6`；原位于 `Xcode/MiPlay`） | **无已证实关系**：本仓库 grep 无任何 MiPlay 引用；MiPlay 的文本文件里也没有 DSH Studio 引用 |
+| DXMT | `Developer/MiPlay/MiPlay DXMT`（git 仓库，HEAD `0b38478`；原归类在 `Forks/` 下） | **待确认**：未发现与本项目的任何代码、格式、API 或构建关系 |
+| LSFG | `Developer/MiPlay/MiPlay LSFG`（git 仓库，HEAD `1eeafad`） | **待确认**：同上 |
+| `Developer/Forks/` | 迁移后为空目录（DXMT/LSFG 已按新结构移入 MiPlay 工程） | 历史分类方式，已无内容；不属于本项目职责 |
 
-**不做推断**：不假定 DXMT/LSFG 与 MiPlay 或与本项目存在依赖关系——没有任何证据支持。
+**不做推断**：按迁移指令，DXMT 与 LSFG 属于 MiPlay 工程而非独立 Fork；但**没有任何证据**表明它们与本
+Runtime 项目存在依赖关系，本文件不建立这种关系。
 
 ## 4. 与本仓库共享的"资源"清单（迁移时要一起带走）
 
@@ -73,7 +79,7 @@
 4. **插件市场解析职责**若迁移，需要客户端接受"安装期解析"带来的 registry 动态性。
 5. **签名锚轮换**必须与 App 发版同步，无法在 Runtime 仓库单独完成。
 
-## 6. 信息缺口（如实记录）
+## 6. 信息缺口（2026-10-11 审计时）
 
 - 无法访问 DXMT/LSFG 的代码或远程仓库；无法判断它们与本项目是否有工程级关系。
 - 无法访问客户端仓库的未提交改动（只读审计基于当时工作区）。
